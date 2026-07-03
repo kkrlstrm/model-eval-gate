@@ -5,7 +5,7 @@
  * mode that a recorded eval proved is safe for that exact task shape. It is not a
  * general-purpose model picker: every request whose mode isn't on the allowlist
  * is refused at the CLI layer. Retired modes return a refusal with the reason and
- * date. This is routing as governed policy, not vibes.
+ * date. This is delegation as governed policy, not vibes.
  *
  * The allowlist lives in `routes.json` (the single source of truth, shared with
  * the Python port in src/router.py). This file reads it and enforces it. Read
@@ -140,10 +140,9 @@ if (mode in RETIRED_MODES) {
 if (!(mode in MODES)) {
   console.error(`✗ Mode "${mode}" is not on the allowlist.`);
   console.error('');
-  console.error('  model-eval-gate enforces a strict routing policy (see GOVERNANCE.md).');
-  console.error('  Only eval-verified modes are allowed; everything else is refused here.');
-  console.error('  If your task does not fit one of the allowed modes, the orchestrator');
-  console.error('  (your frontier model) should handle it directly.');
+  console.error('  model-eval-gate enforces a strict delegation policy (see GOVERNANCE.md).');
+  console.error('  Only eval-verified modes are allowed; everything else stays with the orchestrator');
+  console.error('  (your frontier model). If your task does not fit an earned mode, handle it there.');
   console.error('');
   console.error('Run `src/cli.ts help` for the allowlist.');
   process.exit(2);

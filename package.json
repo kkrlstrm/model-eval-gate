@@ -1,7 +1,7 @@
 {
   "name": "model-eval-gate",
   "version": "0.1.0",
-  "description": "Eval-gated model routing with an enforced allowlist — refuse to delegate to a cheaper model until a recorded eval proves it is safe for that exact task type.",
+  "description": "A circuit breaker for cheap-model delegation. An eval-backed allowlist that lets agents use non-frontier models only where your own evals prove they are safe for that exact task, and refuses every other downgrade by default.",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": ["llm", "model-routing", "openrouter", "evals", "llmops", "governance"],

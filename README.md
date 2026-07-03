@@ -1,14 +1,16 @@
 # model-eval-gate
 
-**Eval-gated model routing with an enforced allowlist.** Don't route a task to a cheaper model until a recorded eval proves that model is safe for that *exact* task type — and enforce it at the CLI, not by convention.
+**A circuit breaker for cheap-model delegation.**
 
-Most "model routers" pick a model at call time on price or vibes ("use the cheap one here"). `model-eval-gate` inverts that: a task can only be delegated to a non-frontier model through a **named mode**, and a mode only exists because an eval against your real data cleared a strict quality bar. Everything else is refused. Retired modes return a refusal with the reason and the date. The routing table is a *governed policy*, not a lookup.
+Agents shouldn't route work to a cheaper model just because it's cheap, fast, or "probably good enough." A non-frontier model gets used only when it has *earned* a narrow permission: a named task mode, backed by an eval on your real data, with explicit `use_when` / `do_not_use_when` boundaries. Everything else stays with the frontier / orchestrator model.
+
+**model-eval-gate turns eval results into enforceable delegation policy.** If a task matches an eval-verified mode, it can run on the approved non-frontier model. If it doesn't, the call is refused. Retired modes fail closed with the date and the reason, so old shortcuts don't silently come back.
 
 ```
 $ npx tsx src/cli.ts translate "..."
 ✗ Mode "translate" is not on the allowlist.
-  model-eval-gate enforces a strict routing policy (see GOVERNANCE.md).
-  Only eval-verified modes are allowed; everything else is refused here.
+  model-eval-gate enforces a strict delegation policy (see GOVERNANCE.md).
+  Only eval-verified modes are allowed; everything else stays with the orchestrator.
 
 $ npx tsx src/cli.ts generic-cheap "..."
 ✗ Mode "generic-cheap" is RETIRED.
@@ -16,28 +18,70 @@ $ npx tsx src/cli.ts generic-cheap "..."
   it invited misuse on single-row decisions. Replaced by the narrower extract-bulk.
 ```
 
-## Why
+## The failure mode
 
-Cheap models are genuinely good at *some* things and quietly terrible at others, and the boundary is task-shaped, not model-shaped. A model that's at frontier parity on bulk field extraction can be 20% wrong on the same extraction when a human acts on each row. The only way to know where the line is, is to run an eval on your own data — and the only way to keep that knowledge from rotting is to (a) encode the boundary where it can't be ignored and (b) re-check it as models drift.
+The dangerous delegation bug isn't an outage. It's a **quiet downgrade.**
 
-`model-eval-gate` is the thin layer that does both:
+A cheap model works beautifully on 80% of a task shape, gets generalized into "use this for extraction / classification / summarization," and then starts handling the 20% where it fails silently. Nobody notices until a human acts on a single wrong row, a customer-facing draft hallucinates an entity, or quality slips because the provider behind a model ID changed underneath you.
 
-- **Modes are named for the use case, not the model** (`extract-bulk`, `filter-auto-reply`), so you can't pattern-match a model to a task type — you have to describe the task.
-- **Each mode carries `use_when` / `do_not_use_when`** tied to a documented failure, so misuse is hard.
-- **The allowlist is enforced at the CLI/library layer**, not left to a prompt or a code review.
-- **A regression harness** re-checks each mode against the model the allowlist currently routes it to, over multiple trials, and fails on drift.
+model-eval-gate prevents that failure mode by making delegation **explicit, narrow, evidenced, and reversible.**
 
-It is **not** an eval framework (use Promptfoo / Braintrust / Harbor to *run* evals). It's the governance layer that sits on top of eval results and **enforces the verdict**.
+## Why this isn't a router
+
+"Model routing" is the wrong comparison set. LiteLLM / OpenRouter route the *call* — provider selection, cost and latency, fallback. model-eval-gate sits one layer up and decides whether the call is **allowed to be delegated at all.**
+
+> OpenRouter can route the call.
+> model-eval-gate decides whether the call is allowed to be delegated in the first place.
+
+Three ideas do the work:
+
+1. **Refusal is the feature.** Most routers optimize "where should this go?" This says: unless a task has earned a mode, it doesn't go anywhere cheaper. Off-allowlist and retired modes are refused, not silently downgraded.
+2. **Modes are named for the task, not the model.** `extract-bulk`, never `qwen`. A mode named after a model becomes a vibes-based lookup table; a mode named after a task shape forces you to describe what you're actually doing — and makes misuse obvious.
+3. **Eval verdicts become production policy.** `routes.json` is the single source of truth — purpose, `use_when`, `do_not_use_when`, evidence reference, verified date, provider pin — read live by both the CLI and the Python port.
+
+## Not an eval framework
+
+model-eval-gate doesn't replace your eval platform (Promptfoo, Braintrust, Harbor, your own harness). It **consumes eval decisions and keeps them honest:**
+
+- an **initial eval** decides whether a mode may exist;
+- a **regression spec** checks whether that permission is still valid.
+
+The included harness is policy *maintenance*, not a competing eval product.
+
+## The lifecycle
+
+```
+   candidate cheap model
+          │
+          ▼
+   eval on your real task data
+          │
+          ▼
+   mode earns a narrow permission
+          │
+          ▼
+   routes.json   ← the allowlist / single source of truth
+          │
+          ▼
+   CLI + Python enforce it   ← refuse everything off-allowlist
+          │
+          ▼
+   regression re-checks for drift
+          │
+     ┌────┴─────┐
+   pass        fail
+   keep mode   retire with a dated reason
+```
 
 ## Install
 
 ```bash
-git clone https://github.com/<you>/model-eval-gate && cd model-eval-gate
+git clone https://github.com/kkrlstrm/model-eval-gate && cd model-eval-gate
 npm install
 cp .env.example .env      # add your OPENROUTER_API_KEY
 ```
 
-Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. `model-eval-gate` is OpenRouter-native (one key, many models).
+Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. model-eval-gate is OpenRouter-native (one key, many models).
 
 ## Use
 
@@ -45,10 +89,10 @@ Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. `model-eval-gate`
 
 ```bash
 npx tsx src/cli.ts help                          # the current allowlist, with verified dates
-npx tsx src/cli.ts extract-bulk "<prompt>"       # runs — allowed mode
+npx tsx src/cli.ts extract-bulk "<prompt>"       # runs — this task has an earned mode
 npx tsx src/cli.ts extract-bulk --stdin "Extract fields:" < big.txt
 npx tsx src/cli.ts extract-multimodal "Read this roster" --image page.png
-npx tsx src/cli.ts anything-else "..."           # refused
+npx tsx src/cli.ts anything-else "..."           # refused — no earned mode
 ```
 
 **From Python** (the same allowlist, no Node required):
@@ -60,7 +104,7 @@ text, usd = vision_call("extract-multimodal", "Read the phone numbers.", "page.p
 # an off-allowlist mode raises ValueError — same refusal as the CLI
 ```
 
-## The allowlist — `routes.json`
+## `routes.json` — eval verdicts as policy
 
 One file is the source of truth, read live by both the CLI and the Python port:
 
@@ -83,13 +127,13 @@ One file is the source of truth, read live by both the CLI and the Python port:
 
 The six modes shipped here are **realistic examples** to show the shape. Replace them with modes your own evals justify. See **[GOVERNANCE.md](GOVERNANCE.md)** for the policy and **[docs/ADDING_A_MODE.md](docs/ADDING_A_MODE.md)** for the workflow.
 
-## Three things that make this more than a config file
+## Three things that keep the policy honest
 
-### 1. Provider pinning (eval → prod drift guard)
+### 1. Provider pinning — the eval→prod drift guard
 
-OpenRouter routes a model id to varying underlying providers and quantizations; an eval scored on one endpoint isn't guaranteed to be what production hits. ([Anthropic quantified how much infrastructure alone can swing agentic eval scores.](https://www.anthropic.com/engineering/infrastructure-noise)) Each mode takes an optional `provider` pin (`{order, only, allowFallbacks, quantizations}`) that both the CLI and the Python port pass on every call, so a production call runs on the endpoint the eval was scored on. The regression harness captures the served provider so you can set a pin from real data.
+Passing an eval against `model-x` isn't enough if production might hit a different provider, quantization, or serving stack. OpenRouter routes a model ID across providers by uptime and cost unless you say otherwise, and [Anthropic has shown that infrastructure configuration alone can swing agentic eval scores by several points](https://www.anthropic.com/engineering/infrastructure-noise) — sometimes more than the gap between models on a leaderboard. Each mode takes an optional `provider` pin (`{order, only, allowFallbacks, quantizations}`) that both the CLI and the Python port pass on every call, so **production runs against the thing you actually tested.** The regression harness records the served provider so you can set a pin from real data.
 
-### 2. A regression harness with pass@k / pass^k
+### 2. Regression with pass@k / pass^k
 
 Capability evals ("can it do this?") graduate into regression evals ("does it still?"). `eval/regression.ts` re-runs each frozen spec against **the model the allowlist currently routes that mode to** (so a swapped model is caught), over **k trials**, and reports:
 
@@ -114,8 +158,8 @@ Specs live in `eval/regression/*.json` and ship with a **synthetic corpus** (fab
 ## Layout
 
 ```
-routes.json              the allowlist — single source of truth
-src/cli.ts               the CLI enforcer (Node/tsx)
+routes.json              the allowlist — eval verdicts as enforceable policy
+src/cli.ts               the CLI enforcer (Node/tsx) — refuses everything off-allowlist
 src/router.py            the Python port — same allowlist, stdlib + requests
 eval/harness.ts          k-trial runner: pass@k / pass^k, cost, served provider
 eval/graders.ts          code / model / human graders

@@ -85,7 +85,7 @@ def _model_for(mode: str) -> str:
         return _ROUTES[mode]["model"]
     except KeyError:
         raise ValueError(
-            f"model-eval-gate: mode {mode!r} is not on the routing allowlist "
+            f"model-eval-gate: mode {mode!r} is not on the delegation allowlist "
             f"({', '.join(sorted(_ROUTES))}). New modes require a passing eval "
             f"per GOVERNANCE.md."
         )

@@ -17,11 +17,7 @@
     {
       "kind": "fieldAgreement",
       "name": "agreement",
-      "fields": [
-        "title_seniority",
-        "function",
-        "org_type"
-      ]
+      "fields": ["title_seniority", "function", "org_type"]
     }
   ],
   "tasks": [

@@ -27,10 +27,21 @@ The fastest path is to write the spec you'll keep anyway. A spec is a JSON file 
 
 Use **real data** with **unambiguous gold** — a task where two people would independently agree on the label. Ambiguity in the task becomes noise in the metric. 20–50 tasks is plenty to start.
 
-Grader kinds (`eval/graders.ts`):
-- `fieldAgreement` — deterministic, compares each field to the frozen gold. The default; free and reproducible.
-- `human` — a recorded verdict carried in each task's `gold.human_verdict` (`true`/`false`). Use it to freeze a judgment call you made by hand.
-- `llmJudge` — an LLM scores the output against a rubric (`{ "kind": "llmJudge", "model": "…", "rubric": "…" }`). Opt-in; it spends tokens per trial.
+Grader kinds (`eval/graders.ts`) — **code** graders are deterministic, free, and reproducible (prefer them):
+
+- `fieldAgreement` / `normalizedFieldAgreement` — compare fields to the frozen gold (exact, or whitespace/punctuation/case-normalized).
+- `enumMatch` — a field must equal gold **and** be a member of an allowed enum.
+- `numericWithinTolerance` — numeric fields within an absolute tolerance.
+- `arraySetMatch` — compare an array field as a set (order/dupes ignored).
+- `mustNotContain` — the output must not contain given substrings.
+- `regexMatch` — a field must match a pattern.
+- `jsonSubset` — every key/value in gold must be present in the output.
+- `human` — a recorded verdict carried in each task's `gold.human_verdict` (`true`/`false`), to freeze a hand-made judgment call.
+- `llmJudge` — an LLM scores the output against a rubric (`{ "kind": "llmJudge", "model": "…", "rubric": "…" }`). Opt-in; spends tokens per trial.
+
+**Optional `constraints`** on a mode turn its advisory `use_when` / `do_not_use_when` into machine-checkable eligibility (`min_rows`, `forbid_single_row_decision`, `requires_human_review`, `allowed_input_types`, `max_stakes`). The CLI and `can_delegate()` refuse a task that breaks them — so a mode can't be misused on a task it wasn't proven for, not just misnamed.
+
+Validate everything offline anytime (no API key): `npm run check` (or `python src/router.py check`).
 
 ## 2. Score the candidate against a frontier anchor
 

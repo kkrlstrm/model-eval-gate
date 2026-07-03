@@ -1,0 +1,31 @@
+name: ci
+
+# Everything here is OFFLINE — no OPENROUTER_API_KEY, no model calls. It validates
+# the policy files, type-checks, and runs the TS+Python parity tests. The live
+# regression suite (eval/regression.ts) needs a key and is run on a schedule/manually,
+# not in CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  policy-and-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Validate policy files (routes + specs, offline)
+        run: npm run check
+      - name: TS + Python parity tests
+        run: npm test
+      - name: Formatting
+        run: npm run format:check

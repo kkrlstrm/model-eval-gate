@@ -18,23 +18,34 @@ import { callModel } from '@openrouter/agent';
 import type { Grader, GraderResult } from './graders.ts';
 
 export type Task = { id: string; input: string | any[]; gold: any };
-export type ModelSpec = { model: string; label?: string; priceIn: number; priceOut: number; provider?: any | null };
+export type ModelSpec = {
+  model: string;
+  label?: string;
+  priceIn: number;
+  priceOut: number;
+  provider?: any | null;
+};
 
+// A trial can fail for three unrelated reasons; keep them separate so a transient
+// OpenRouter outage never masquerades as a model regression.
+export type TrialOutcome = 'ok' | 'provider_unavailable' | 'parse_failure' | 'grader_failure';
 export type TrialResult = {
   pass: boolean;
   score: number;
   ms: number;
   cost: number;
+  costReported: boolean; // true = OpenRouter-reported cost; false = route-file estimate
   provider: string | null;
   graders: GraderResult[];
   parseOk: boolean;
+  outcome: TrialOutcome;
 };
 export type TaskResult = {
   task_id: string;
   trials: TrialResult[];
   passes: number;
-  passAtK: number;   // 0 | 1
-  passHatK: number;  // 0 | 1
+  passAtK: number; // 0 | 1
+  passHatK: number; // 0 | 1
   meanScore: number;
   scoreStdev: number;
 };
@@ -44,12 +55,14 @@ export type SuiteResult = {
   k: number;
   threshold: number;
   tasks: TaskResult[];
-  passAtK: number;      // mean over tasks
-  passHatK: number;     // mean over tasks
+  passAtK: number; // mean over tasks
+  passHatK: number; // mean over tasks
   meanScore: number;
   totalCost: number;
+  totalCostReported: boolean; // false if any trial fell back to a route-file estimate
   totalMs: number;
   providersSeen: string[];
+  outcomes: Record<TrialOutcome, number>; // trial counts by outcome
 };
 
 const stdev = (xs: number[]): number => {
@@ -70,7 +83,11 @@ async function runTrial(
   if (spec.provider) callArgs.provider = spec.provider;
   const t0 = Date.now();
   let text = '';
-  let inTok = 0, outTok = 0, provider: string | null = null;
+  let inTok = 0,
+    outTok = 0,
+    provider: string | null = null;
+  let reportedCost: number | null = null;
+  let callFailed = false;
   try {
     const r = callModel(client, callArgs);
     text = await r.getText();
@@ -79,17 +96,51 @@ async function runTrial(
       inTok = resp?.usage?.inputTokens ?? resp?.usage?.prompt_tokens ?? 0;
       outTok = resp?.usage?.outputTokens ?? resp?.usage?.completion_tokens ?? 0;
       provider = resp?.provider ?? resp?.raw?.provider ?? null;
+      if (typeof resp?.usage?.cost === 'number') reportedCost = resp.usage.cost;
     } catch {}
   } catch (e: any) {
-    text = '';
+    callFailed = true; // the API/provider failed — NOT a model-quality signal
   }
   const ms = Date.now() - t0;
-  const cost = (inTok * spec.priceIn + outTok * spec.priceOut) / 1_000_000;
-  const parsed = (() => { try { return parse(text); } catch { return null; } })();
+  const estCost = (inTok * spec.priceIn + outTok * spec.priceOut) / 1_000_000;
+  const cost = reportedCost ?? estCost; // prefer OpenRouter-reported cost
+  const parsed = (() => {
+    try {
+      return parse(text);
+    } catch {
+      return null;
+    }
+  })();
+
   const grs: GraderResult[] = [];
-  for (const g of graders) grs.push(await g.grade(parsed, { gold: task.gold, client }));
+  let graderThrew = false;
+  for (const g of graders) {
+    try {
+      grs.push(await g.grade(parsed, { gold: task.gold, client }));
+    } catch {
+      graderThrew = true;
+    }
+  }
   const score = grs.length ? grs.reduce((a, b) => a + b.score, 0) / grs.length : 0;
-  return { pass: score >= threshold, score, ms, cost, provider, graders: grs, parseOk: parsed != null };
+
+  const outcome: TrialOutcome = callFailed
+    ? 'provider_unavailable'
+    : graderThrew
+      ? 'grader_failure'
+      : parsed == null
+        ? 'parse_failure'
+        : 'ok';
+  return {
+    pass: outcome === 'ok' && score >= threshold,
+    score,
+    ms,
+    cost,
+    costReported: reportedCost != null,
+    provider,
+    graders: grs,
+    parseOk: parsed != null,
+    outcome,
+  };
 }
 
 export async function runSuite(opts: {
@@ -106,7 +157,15 @@ export async function runSuite(opts: {
   const label = spec.label ?? spec.model;
   const taskResults: TaskResult[] = [];
   const providersSeen = new Set<string>();
-  let totalCost = 0, totalMs = 0;
+  const outcomes: Record<TrialOutcome, number> = {
+    ok: 0,
+    provider_unavailable: 0,
+    parse_failure: 0,
+    grader_failure: 0,
+  };
+  let totalCost = 0,
+    totalMs = 0,
+    anyEstimated = false;
 
   for (const task of tasks) {
     const trials: TrialResult[] = [];
@@ -115,8 +174,12 @@ export async function runSuite(opts: {
       trials.push(tr);
       totalCost += tr.cost;
       totalMs += tr.ms;
+      outcomes[tr.outcome]++;
+      if (!tr.costReported) anyEstimated = true;
       if (tr.provider) providersSeen.add(tr.provider);
-      opts.onProgress?.(`[${label}] ${task.id} trial ${i + 1}/${k} score=${tr.score.toFixed(2)} ${tr.pass ? 'pass' : 'FAIL'}`);
+      opts.onProgress?.(
+        `[${label}] ${task.id} trial ${i + 1}/${k} score=${tr.score.toFixed(2)} ${tr.pass ? 'pass' : 'FAIL'}`,
+      );
     }
     const passes = trials.filter((t) => t.pass).length;
     const scores = trials.map((t) => t.score);
@@ -142,7 +205,9 @@ export async function runSuite(opts: {
     passHatK: taskResults.reduce((a, t) => a + t.passHatK, 0) / n,
     meanScore: taskResults.reduce((a, t) => a + t.meanScore, 0) / n,
     totalCost,
+    totalCostReported: !anyEstimated,
     totalMs,
     providersSeen: [...providersSeen],
+    outcomes,
   };
 }

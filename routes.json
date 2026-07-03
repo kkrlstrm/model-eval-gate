@@ -7,18 +7,19 @@
     "extract-bulk": {
       "model": "qwen/qwen3-235b-a22b-2507",
       "priceIn": 0.07,
-      "priceOut": 0.10,
+      "priceOut": 0.1,
       "purpose": "High-volume field extraction whose output feeds aggregate analytics.",
       "use_when": "N > 50 rows AND output is counted/grouped/distributed downstream (not acted on per-row).",
       "do_not_use_when": "An operator will read a single output row and make a decision from it. ~20% disagreement with the frontier anchor on judgment-laden fields (e.g. seniority on ambiguous titles).",
       "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
       "verified_date": "2026-05-18",
-      "provider": null
+      "provider": null,
+      "constraints": { "min_rows": 50, "forbid_single_row_decision": true, "max_stakes": "low" }
     },
     "filter-auto-reply": {
       "model": "google/gemini-2.5-flash-lite",
-      "priceIn": 0.10,
-      "priceOut": 0.40,
+      "priceIn": 0.1,
+      "priceOut": 0.4,
       "purpose": "Binary autoresponder / out-of-office detection in an email reply pipeline.",
       "use_when": "Single binary decision (auto vs not auto). High volume, low per-row stakes.",
       "do_not_use_when": "Any multi-class classification, intent detection, or judgment task. On multi-class labeling this model produces literal pattern-matches that are semantically wrong.",
@@ -28,8 +29,8 @@
     },
     "lint-code": {
       "model": "mistralai/codestral-2508",
-      "priceIn": 0.30,
-      "priceOut": 0.90,
+      "priceIn": 0.3,
+      "priceOut": 0.9,
       "purpose": "Pre-pass code linter — surfaces edge-case bugs a longer frontier review may bury.",
       "use_when": "You are about to review code AND want a fast, cheap supplemental pass. Findings MUST be re-evaluated by the orchestrator before action.",
       "do_not_use_when": "You need the primary architecture/security review. In evals the frontier anchor caught a SQL-injection vector in real code that this model missed entirely.",
@@ -39,8 +40,8 @@
     },
     "digest-longcontext": {
       "model": "deepseek/deepseek-v4-flash",
-      "priceIn": 0.10,
-      "priceOut": 0.20,
+      "priceIn": 0.1,
+      "priceOut": 0.2,
       "purpose": "Entity-grounded structured digest over large multi-document context (transcripts / long docs).",
       "use_when": "Synthesizing many long documents into structured signal (named people, topics, objections) where entity accuracy matters. Large context window, far cheaper than the frontier anchor.",
       "do_not_use_when": "The synthesis drives a high-stakes irreversible decision with no human review — the frontier model is the floor there. For image/scanned-PDF input use a vision mode instead.",
@@ -50,8 +51,8 @@
     },
     "extract-accurate": {
       "model": "deepseek/deepseek-v4-flash",
-      "priceIn": 0.10,
-      "priceOut": 0.20,
+      "priceIn": 0.1,
+      "priceOut": 0.2,
       "purpose": "Higher-accuracy bulk field extraction — the precision-leaning sibling of extract-bulk.",
       "use_when": "Bulk extraction where per-field accuracy matters more than raw throughput and latency is not the constraint. Beats the throughput model on anchor-agreement.",
       "do_not_use_when": "You need maximum throughput / lowest latency on a huge synchronous batch — use extract-bulk there. Also NOT for single-row decisions a human acts on directly.",
@@ -61,14 +62,15 @@
     },
     "extract-multimodal": {
       "model": "minimax/minimax-m3",
-      "priceIn": 0.30,
-      "priceOut": 1.20,
+      "priceIn": 0.3,
+      "priceOut": 1.2,
       "purpose": "Vision extraction/transcription from a page IMAGE or scanned/image PDF whose text layer is absent.",
       "use_when": "A scanned/image PDF or page image where a text extractor returns nothing and you need grounded content off the pixels (e.g. a roster, an agenda). Pass --image <path> (repeatable). Matched the frontier vision anchor on recall and name<->value pairing with zero hallucinated values, at a fraction of the cost.",
       "do_not_use_when": "The page is text-extractable (a text layer already exists — the text modes are cheaper). Also NOT for a per-row value acted on without a human verify.",
       "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 8'",
       "verified_date": "2026-06-25",
-      "provider": null
+      "provider": null,
+      "constraints": { "allowed_input_types": ["image"] }
     }
   },
   "retired": {

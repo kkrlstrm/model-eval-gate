@@ -17,9 +17,7 @@
     {
       "kind": "fieldAgreement",
       "name": "binary",
-      "fields": [
-        "automated_reply"
-      ]
+      "fields": ["automated_reply"]
     }
   ],
   "tasks": [

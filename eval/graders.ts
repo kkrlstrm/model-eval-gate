@@ -12,12 +12,17 @@ import { callModel } from '@openrouter/agent';
 
 export type Assertion = { name: string; pass: boolean; detail?: string };
 export type GraderKind = 'code' | 'model' | 'human';
-export type GraderResult = { grader: string; kind: GraderKind; score: number; assertions: Assertion[] };
+export type GraderResult = {
+  grader: string;
+  kind: GraderKind;
+  score: number;
+  assertions: Assertion[];
+};
 
 /** Context handed to every grader for a single output. */
 export type GradeCtx = {
-  gold: any;               // frozen reference / labels for this task
-  client?: OpenRouter;     // present only when a model grader is used
+  gold: any; // frozen reference / labels for this task
+  client?: OpenRouter; // present only when a model grader is used
 };
 
 export type Grader = {
@@ -37,9 +42,10 @@ export function codeGrader(name: string, fn: (parsed: any, gold: any) => Asserti
     name,
     kind: 'code',
     grade: (parsed, ctx) => {
-      const assertions = parsed == null
-        ? [{ name: 'parseable', pass: false, detail: 'output did not parse' }]
-        : fn(parsed, ctx.gold);
+      const assertions =
+        parsed == null
+          ? [{ name: 'parseable', pass: false, detail: 'output did not parse' }]
+          : fn(parsed, ctx.gold);
       return { grader: name, kind: 'code', score: scoreOf(assertions), assertions };
     },
   };
@@ -55,11 +61,141 @@ export function codeGrader(name: string, fn: (parsed: any, gold: any) => Asserti
 export function fieldAgreementGrader(name: string, fields: string[]): Grader {
   return codeGrader(name, (parsed, gold) =>
     fields.map((f) => {
-      const a = String(parsed?.[f] ?? '').trim().toLowerCase();
-      const b = String(gold?.[f] ?? '').trim().toLowerCase();
-      return { name: f, pass: a === b, detail: a === b ? undefined : `got "${parsed?.[f]}" want "${gold?.[f]}"` };
+      const a = String(parsed?.[f] ?? '')
+        .trim()
+        .toLowerCase();
+      const b = String(gold?.[f] ?? '')
+        .trim()
+        .toLowerCase();
+      return {
+        name: f,
+        pass: a === b,
+        detail: a === b ? undefined : `got "${parsed?.[f]}" want "${gold?.[f]}"`,
+      };
     }),
   );
+}
+
+// Exact string equality is brittle for anything with formatting/synonyms/numbers.
+// These deterministic graders cover the common shapes without an LLM.
+const norm = (v: any) =>
+  String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[.,;:!?'"()]/g, '');
+
+/** Like fieldAgreement but normalizes whitespace/punctuation/case before comparing. */
+export function normalizedFieldAgreementGrader(name: string, fields: string[]): Grader {
+  return codeGrader(name, (parsed, gold) =>
+    fields.map((f) => {
+      const pass = norm(parsed?.[f]) === norm(gold?.[f]);
+      return {
+        name: f,
+        pass,
+        detail: pass ? undefined : `got "${parsed?.[f]}" want "${gold?.[f]}"`,
+      };
+    }),
+  );
+}
+
+/** One field must equal gold AND be a member of an allowed enum. */
+export function enumMatchGrader(name: string, field: string, allowed: string[]): Grader {
+  const set = new Set(allowed.map(norm));
+  return codeGrader(name, (parsed, gold) => {
+    const got = parsed?.[field];
+    const inEnum = set.has(norm(got));
+    const eq = norm(got) === norm(gold?.[field]);
+    return [
+      {
+        name: `${field}:in-enum`,
+        pass: inEnum,
+        detail: inEnum ? undefined : `"${got}" not in {${allowed.join(', ')}}`,
+      },
+      {
+        name: `${field}:equals-gold`,
+        pass: eq,
+        detail: eq ? undefined : `got "${got}" want "${gold?.[field]}"`,
+      },
+    ];
+  });
+}
+
+/** Numeric fields must be within an absolute tolerance of gold. */
+export function numericToleranceGrader(name: string, fields: string[], tolerance: number): Grader {
+  return codeGrader(name, (parsed, gold) =>
+    fields.map((f) => {
+      const a = Number(parsed?.[f]);
+      const b = Number(gold?.[f]);
+      const pass = Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerance;
+      return {
+        name: f,
+        pass,
+        detail: pass ? undefined : `got ${parsed?.[f]} want ${gold?.[f]} ±${tolerance}`,
+      };
+    }),
+  );
+}
+
+/** Compare an array field to gold as a SET (order/dupes ignored). */
+export function arraySetMatchGrader(name: string, field: string): Grader {
+  return codeGrader(name, (parsed, gold) => {
+    const a = new Set((Array.isArray(parsed?.[field]) ? parsed[field] : []).map(norm));
+    const b = new Set((Array.isArray(gold?.[field]) ? gold[field] : []).map(norm));
+    const pass = a.size === b.size && [...b].every((x) => a.has(x));
+    return [
+      {
+        name: field,
+        pass,
+        detail: pass ? undefined : `set mismatch: got [${[...a]}] want [${[...b]}]`,
+      },
+    ];
+  });
+}
+
+/** Output (stringified) must NOT contain any of the given substrings. */
+export function mustNotContainGrader(name: string, substrings: string[]): Grader {
+  return codeGrader(name, (parsed) => {
+    const hay = JSON.stringify(parsed ?? '').toLowerCase();
+    return substrings.map((s) => {
+      const hit = hay.includes(s.toLowerCase());
+      return {
+        name: `no:${s}`,
+        pass: !hit,
+        detail: hit ? `output contained forbidden "${s}"` : undefined,
+      };
+    });
+  });
+}
+
+/** A field must match a regular expression. */
+export function regexMatchGrader(name: string, field: string, pattern: string): Grader {
+  const re = new RegExp(pattern);
+  return codeGrader(name, (parsed) => {
+    const v = String(parsed?.[field] ?? '');
+    const pass = re.test(v);
+    return [{ name: field, pass, detail: pass ? undefined : `"${v}" did not match /${pattern}/` }];
+  });
+}
+
+/** Every key/value in gold must be present (deep) in the candidate. */
+export function jsonSubsetGrader(name: string): Grader {
+  const contains = (sup: any, sub: any): boolean => {
+    if (sub === null || typeof sub !== 'object') return norm(sup) === norm(sub);
+    if (Array.isArray(sub))
+      return Array.isArray(sup) && sub.every((s) => sup.some((u: any) => contains(u, s)));
+    return (
+      sup != null &&
+      typeof sup === 'object' &&
+      Object.keys(sub).every((k) => contains(sup[k], sub[k]))
+    );
+  };
+  return codeGrader(name, (parsed, gold) => {
+    const pass = contains(parsed, gold);
+    return [
+      { name: 'subset', pass, detail: pass ? undefined : 'gold is not a subset of the output' },
+    ];
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +207,12 @@ export function llmJudgeGrader(name: string, judgeModel: string, rubric: string)
     kind: 'model',
     grade: async (parsed, ctx) => {
       if (!ctx.client) {
-        return { grader: name, kind: 'model', score: 0, assertions: [{ name: 'judge', pass: false, detail: 'no client supplied' }] };
+        return {
+          grader: name,
+          kind: 'model',
+          score: 0,
+          assertions: [{ name: 'judge', pass: false, detail: 'no client supplied' }],
+        };
       }
       const q = `${rubric}\n\nReference (gold):\n${JSON.stringify(ctx.gold)}\n\nCandidate output:\n${JSON.stringify(parsed)}\n\nRespond with ONLY a JSON object {"score": <0..1>, "reason": "..."}.`;
       try {
@@ -80,9 +221,19 @@ export function llmJudgeGrader(name: string, judgeModel: string, rubric: string)
         const mm = text.match(/\{[\s\S]*\}/);
         const j = mm ? JSON.parse(mm[0]) : { score: 0, reason: 'unparseable judge output' };
         const score = Math.max(0, Math.min(1, Number(j.score) || 0));
-        return { grader: name, kind: 'model', score, assertions: [{ name: 'judge', pass: score >= 0.5, detail: String(j.reason ?? '') }] };
+        return {
+          grader: name,
+          kind: 'model',
+          score,
+          assertions: [{ name: 'judge', pass: score >= 0.5, detail: String(j.reason ?? '') }],
+        };
       } catch (e: any) {
-        return { grader: name, kind: 'model', score: 0, assertions: [{ name: 'judge', pass: false, detail: String(e?.message ?? e) }] };
+        return {
+          grader: name,
+          kind: 'model',
+          score: 0,
+          assertions: [{ name: 'judge', pass: false, detail: String(e?.message ?? e) }],
+        };
       }
     },
   };
@@ -101,10 +252,65 @@ export function recordedHumanGrader(name = 'human-recorded'): Grader {
     grade: (_parsed, ctx) => {
       const v = ctx.gold?.human_verdict;
       if (v == null) {
-        return { grader: name, kind: 'human', score: 1, assertions: [{ name: 'verdict', pass: true, detail: 'no recorded verdict — skipped' }] };
+        return {
+          grader: name,
+          kind: 'human',
+          score: 1,
+          assertions: [{ name: 'verdict', pass: true, detail: 'no recorded verdict — skipped' }],
+        };
       }
       const pass = v === true || v === 'pass';
-      return { grader: name, kind: 'human', score: pass ? 1 : 0, assertions: [{ name: 'verdict', pass, detail: `recorded=${v}` }] };
+      return {
+        grader: name,
+        kind: 'human',
+        score: pass ? 1 : 0,
+        assertions: [{ name: 'verdict', pass, detail: `recorded=${v}` }],
+      };
     },
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Factory — build a grader from a spec's declarative config. Single place the
+// regression runner and `check` both use, so a spec's grader kinds are validated
+// against one list.
+// ─────────────────────────────────────────────────────────────────────────────
+export const GRADER_KINDS = new Set([
+  'fieldAgreement',
+  'normalizedFieldAgreement',
+  'enumMatch',
+  'numericWithinTolerance',
+  'arraySetMatch',
+  'mustNotContain',
+  'regexMatch',
+  'jsonSubset',
+  'human',
+  'llmJudge',
+]);
+
+export function buildGrader(cfg: any): Grader {
+  switch (cfg.kind) {
+    case 'fieldAgreement':
+      return fieldAgreementGrader(cfg.name ?? 'agreement', cfg.fields);
+    case 'normalizedFieldAgreement':
+      return normalizedFieldAgreementGrader(cfg.name ?? 'agreement', cfg.fields);
+    case 'enumMatch':
+      return enumMatchGrader(cfg.name ?? 'enum', cfg.field, cfg.allowed ?? []);
+    case 'numericWithinTolerance':
+      return numericToleranceGrader(cfg.name ?? 'numeric', cfg.fields, cfg.tolerance ?? 0);
+    case 'arraySetMatch':
+      return arraySetMatchGrader(cfg.name ?? 'arrayset', cfg.field);
+    case 'mustNotContain':
+      return mustNotContainGrader(cfg.name ?? 'mustnot', cfg.substrings ?? []);
+    case 'regexMatch':
+      return regexMatchGrader(cfg.name ?? 'regex', cfg.field, cfg.pattern);
+    case 'jsonSubset':
+      return jsonSubsetGrader(cfg.name ?? 'subset');
+    case 'human':
+      return recordedHumanGrader(cfg.name ?? 'human');
+    case 'llmJudge':
+      return llmJudgeGrader(cfg.name ?? 'judge', cfg.model, cfg.rubric);
+    default:
+      throw new Error(`unknown grader kind: ${cfg.kind}`);
+  }
 }

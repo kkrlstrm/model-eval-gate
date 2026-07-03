@@ -1,0 +1,43 @@
+{
+  "_note": "Shared golden fixtures. The TS test (test/parity.ts) and the Python test (test/parity.py) both assert their language's functions against these, proving the two ports agree — same allowlist, same provider-pin wire mapping, same constraint verdicts, same refusals.",
+  "provider_pins": [
+    { "pin": null, "http": null },
+    {
+      "pin": { "order": ["deepinfra"], "allowFallbacks": false, "quantizations": ["fp8"] },
+      "http": { "order": ["deepinfra"], "quantizations": ["fp8"], "allow_fallbacks": false }
+    },
+    { "pin": { "only": ["together"] }, "http": { "only": ["together"] } },
+    { "pin": { "allowFallbacks": true }, "http": { "allow_fallbacks": true } }
+  ],
+  "constraint_cases": [
+    { "constraints": { "min_rows": 50 }, "meta": { "rows": 3 }, "ok": false },
+    { "constraints": { "min_rows": 50 }, "meta": { "rows": 100 }, "ok": true },
+    {
+      "constraints": { "forbid_single_row_decision": true },
+      "meta": { "single_row_decision": true },
+      "ok": false
+    },
+    {
+      "constraints": { "forbid_single_row_decision": true },
+      "meta": { "single_row_decision": false },
+      "ok": true
+    },
+    {
+      "constraints": { "allowed_input_types": ["image"] },
+      "meta": { "input_type": "text" },
+      "ok": false
+    },
+    {
+      "constraints": { "allowed_input_types": ["image"] },
+      "meta": { "input_type": "image" },
+      "ok": true
+    },
+    { "constraints": { "max_stakes": "low" }, "meta": { "stakes": "high" }, "ok": false },
+    { "constraints": { "max_stakes": "medium" }, "meta": { "stakes": "medium" }, "ok": true },
+    { "constraints": {}, "meta": {}, "ok": true }
+  ],
+  "refusals": {
+    "unknown": ["translate", "summarize", "definitely-not-a-mode"],
+    "must_exist": ["extract-bulk", "filter-auto-reply", "extract-multimodal"]
+  }
+}

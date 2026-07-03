@@ -48,6 +48,12 @@ model-eval-gate doesn't replace your eval platform (Promptfoo, Braintrust, Harbo
 
 The included harness is policy *maintenance*, not a competing eval product.
 
+## Scope: a gate, not a sandbox
+
+Be clear-eyed about the boundary. **model-eval-gate is a fail-closed gate for calls that go *through* it** — the CLI or the Python port. It is **not** a sandbox or a network-level policy boundary: an agent, service, or script that calls OpenRouter (or a provider) directly bypasses it entirely.
+
+To make it a real control plane rather than a governed helper, **make it the only model-egress path** — e.g. run the calling code without provider API keys in its environment and expose only this wrapper, or put it behind an egress proxy that blocks direct provider domains. Within that boundary, the guarantees hold: unknown/retired modes are refused before any call, task metadata is checked against machine-readable constraints, and the policy file is validated on load (a malformed `routes.json` refuses everything rather than routing on garbage).
+
 ## The lifecycle
 
 ```
@@ -89,19 +95,30 @@ Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. model-eval-gate i
 
 ```bash
 npx tsx src/cli.ts help                          # the current allowlist, with verified dates
-npx tsx src/cli.ts extract-bulk "<prompt>"       # runs — this task has an earned mode
-npx tsx src/cli.ts extract-bulk --stdin "Extract fields:" < big.txt
+npx tsx src/cli.ts explain extract-bulk          # one mode's purpose, boundaries, evidence, pin, constraints
+npx tsx src/cli.ts extract-bulk "<prompt>" --rows 5000   # runs — earned mode AND constraints satisfied
+npx tsx src/cli.ts extract-bulk "<prompt>" --rows 3      # REFUSED — mode requires min_rows: 50
 npx tsx src/cli.ts extract-multimodal "Read this roster" --image page.png
 npx tsx src/cli.ts anything-else "..."           # refused — no earned mode
 ```
 
+Task-eligibility flags (`--rows N`, `--stakes low|medium|high`, `--input text|image`, `--single-row`, `--human-reviewed`) are checked against each mode's `constraints` — so a mode can't be misused on a task it wasn't proven for, not just misnamed.
+
 **From Python** (the same allowlist, no Node required):
 
 ```python
-from src.router import text_call, vision_call
-text, usd = text_call("digest-longcontext", "Summarize the key people.", long_document)
+from src.router import text_call, vision_call, can_delegate
+if can_delegate("extract-bulk", {"rows": 5000, "single_row_decision": False})["ok"]:
+    text, usd = text_call("extract-bulk", "Extract fields:", big_text)
 text, usd = vision_call("extract-multimodal", "Read the phone numbers.", "page.png")
 # an off-allowlist mode raises ValueError — same refusal as the CLI
+```
+
+**Validate the policy offline** (no key, CI-friendly) and inspect a mode:
+
+```bash
+npx tsx src/check.ts        # validate routes.json + every regression spec (or: python src/router.py check)
+npm run typecheck && npm test   # tsc + TS/Python parity tests — all offline
 ```
 
 ## `routes.json` — eval verdicts as policy
@@ -153,21 +170,37 @@ Specs live in `eval/regression/*.json` and ship with a **synthetic corpus** (fab
 
 ### 3. A three-grader taxonomy
 
-`eval/graders.ts` implements the [three grader kinds from Anthropic's evals guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents): **code** (deterministic, the default), **model** (LLM-as-judge, opt-in), **human** (a recorded verdict frozen into the spec). A spec declares which graders apply; the harness combines them.
+`eval/graders.ts` implements the [three grader kinds from Anthropic's evals guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents): **code** (deterministic — the default; field-agreement, normalized, enum, numeric-tolerance, array-set, must-not-contain, regex, json-subset), **model** (LLM-as-judge, opt-in), **human** (a recorded verdict frozen into the spec). A regression run separates model-quality drift from `provider_unavailable` / `parse_failure` / `grader_failure`, so a transient outage never looks like a regression.
 
 ## Layout
 
 ```
 routes.json              the allowlist — eval verdicts as enforceable policy
+src/schema.ts            zod validation of routes + specs (fail-closed on load)
 src/cli.ts               the CLI enforcer (Node/tsx) — refuses everything off-allowlist
 src/router.py            the Python port — same allowlist, stdlib + requests
-eval/harness.ts          k-trial runner: pass@k / pass^k, cost, served provider
-eval/graders.ts          code / model / human graders
-eval/regression.ts       re-run frozen specs, detect drift, exit non-zero
+src/preflight.ts         machine-checkable constraints → canDelegate(mode, taskMeta)
+src/check.ts             offline policy validator (no API) — routes + every spec
+eval/harness.ts          k-trial runner: pass@k / pass^k, outcome taxonomy, real cost
+eval/graders.ts          the grader taxonomy + buildGrader factory
+eval/regression.ts       re-run frozen specs, classify drift, exit non-zero
 eval/regression/*.json   frozen specs + synthetic gold
+test/                    offline TS+Python parity tests (shared golden fixtures)
 GOVERNANCE.md            the policy: a mode requires a passing eval
 docs/ADDING_A_MODE.md ·  docs/OBSERVATIONS.example.md
 ```
+
+## Development
+
+```bash
+npm run typecheck    # tsc --noEmit
+npm run check        # validate all policy files (offline)
+npm test             # TS + Python parity tests (offline)
+npm run format       # prettier
+npm run ci           # all of the above — the same gate GitHub Actions runs
+```
+
+CI (`.github/workflows/ci.yml`) runs the offline gate on every push/PR. The live regression suite needs a key and runs on a schedule, not in CI.
 
 ## License
 

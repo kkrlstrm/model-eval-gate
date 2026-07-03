@@ -36,8 +36,8 @@ A new mode requires, in order:
 1. **An eval against your real data** (not synthetic), using the harness pattern in `eval/`.
 2. **Quality scored against a frontier anchor** (your orchestrator model) on that data.
 3. **A clear pass of a strict bar** — measurable parity for the use case, not "good enough with caveats." If the recommendation needs an "if you scaffold the prompt with…" clause, it does not qualify.
-4. **A `use_when` / `do_not_use_when` pair** narrow enough that misuse is hard, each tied to something the eval actually showed.
-5. **An entry in `routes.json`** (+ an evidence entry in your observations log) with a `verified_date`.
+4. **A `use_when` / `do_not_use_when` pair** narrow enough that misuse is hard, each tied to something the eval actually showed. Where the boundary is machine-checkable, also add a **`constraints`** block (`min_rows`, `forbid_single_row_decision`, `requires_human_review`, `allowed_input_types`, `max_stakes`) so the gate enforces task eligibility, not just the mode name.
+5. **An entry in `routes.json`** (+ an evidence entry in your observations log) with a `verified_date`. `routes.json` is validated on load — a malformed policy file (missing field, non-ISO date, generic mode name, a name in both `modes` and `retired`) fails closed and refuses everything. Run `npm run check` to validate offline.
 
 A mode that later fails a re-eval is **retired with a dated reason**, not silently deleted — the refusal message teaches the next operator why.
 

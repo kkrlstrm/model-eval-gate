@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-or-route (Python port) — the same eval-gated allowlist, callable from Python.
+model-eval-gate (Python port) — the same eval-gated allowlist, callable from Python.
 
 Every non-frontier delegation goes through ONE model-routing allowlist. The CLI
 enforcer (src/cli.ts) is the interactive front door; this module is the library
@@ -85,7 +85,7 @@ def _model_for(mode: str) -> str:
         return _ROUTES[mode]["model"]
     except KeyError:
         raise ValueError(
-            f"or-route: mode {mode!r} is not on the routing allowlist "
+            f"model-eval-gate: mode {mode!r} is not on the routing allowlist "
             f"({', '.join(sorted(_ROUTES))}). New modes require a passing eval "
             f"per GOVERNANCE.md."
         )
@@ -135,10 +135,10 @@ def _http_post(payload: dict, timeout: int) -> tuple[str | None, float]:
                                              "Content-Type": "application/json"},
                           json=payload, timeout=timeout)
     except Exception as e:  # noqa: BLE001
-        print(f"[or-route] OpenRouter call failed ({e.__class__.__name__})", file=sys.stderr)
+        print(f"[model-eval-gate] OpenRouter call failed ({e.__class__.__name__})", file=sys.stderr)
         return None, 0.0
     if r.status_code != 200:
-        print(f"[or-route] OpenRouter HTTP {r.status_code}: {r.text[:160]}", file=sys.stderr)
+        print(f"[model-eval-gate] OpenRouter HTTP {r.status_code}: {r.text[:160]}", file=sys.stderr)
         return None, 0.0
     try:
         data = r.json()

@@ -1,5 +1,5 @@
 {
-  "name": "or-route",
+  "name": "model-eval-gate",
   "version": "0.1.0",
   "description": "Eval-gated model routing with an enforced allowlist — refuse to delegate to a cheaper model until a recorded eval proves it is safe for that exact task type.",
   "type": "module",

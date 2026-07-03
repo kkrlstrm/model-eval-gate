@@ -1,5 +1,5 @@
 /**
- * or-route — the ENFORCER.
+ * model-eval-gate — the ENFORCER.
  *
  * Delegates a single task to a non-frontier model via OpenRouter, but ONLY for a
  * mode that a recorded eval proved is safe for that exact task shape. It is not a
@@ -140,7 +140,7 @@ if (mode in RETIRED_MODES) {
 if (!(mode in MODES)) {
   console.error(`✗ Mode "${mode}" is not on the allowlist.`);
   console.error('');
-  console.error('  or-route enforces a strict routing policy (see GOVERNANCE.md).');
+  console.error('  model-eval-gate enforces a strict routing policy (see GOVERNANCE.md).');
   console.error('  Only eval-verified modes are allowed; everything else is refused here.');
   console.error('  If your task does not fit one of the allowed modes, the orchestrator');
   console.error('  (your frontier model) should handle it directly.');

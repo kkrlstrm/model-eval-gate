@@ -1,6 +1,6 @@
 # Routing governance
 
-This is the policy `or-route` enforces. It governs when a task may be delegated to a non-frontier model versus handled by the orchestrator (your primary/frontier model) directly.
+This is the policy `model-eval-gate` enforces. It governs when a task may be delegated to a non-frontier model versus handled by the orchestrator (your primary/frontier model) directly.
 
 ## The default is the orchestrator
 

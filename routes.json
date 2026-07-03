@@ -1,5 +1,5 @@
 {
-  "_schema": "or-route/1",
+  "_schema": "model-eval-gate/1",
   "_readme": "Eval-gated model-routing allowlist. SINGLE SOURCE OF TRUTH, read live by the CLI enforcer (src/cli.ts) and the Python port (src/router.py). Every mode is named for its USE CASE, not its model, and should exist ONLY because a recorded eval against your real data cleared a strict quality bar. Do NOT hand-add a mode without a passing eval + an evidence entry (see GOVERNANCE.md). A mode that fails a re-eval gets moved to 'retired' with a dated reason, never silently deleted. The six modes below are REALISTIC EXAMPLES to show the shape — replace them with modes your own evals justify.",
   "staleness_warn_days": 120,
   "provider_pin_note": "mode.provider (optional) pins OpenRouter provider routing so a PRODUCTION call runs on the same underlying endpoint/quantization the eval was scored on (closes eval->prod drift; see the Anthropic 'infrastructure-noise in agentic evals' finding). Shape: {\"order\":[\"deepinfra\"],\"allowFallbacks\":false,\"quantizations\":[\"fp8\"]}. null = unpinned (the router picks). Populate it from a served-provider value captured by an eval/regression run, then let regression assert it stays put.",

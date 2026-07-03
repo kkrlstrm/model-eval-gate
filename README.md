@@ -1,13 +1,13 @@
-# or-route
+# model-eval-gate
 
 **Eval-gated model routing with an enforced allowlist.** Don't route a task to a cheaper model until a recorded eval proves that model is safe for that *exact* task type — and enforce it at the CLI, not by convention.
 
-Most "model routers" pick a model at call time on price or vibes ("use the cheap one here"). `or-route` inverts that: a task can only be delegated to a non-frontier model through a **named mode**, and a mode only exists because an eval against your real data cleared a strict quality bar. Everything else is refused. Retired modes return a refusal with the reason and the date. The routing table is a *governed policy*, not a lookup.
+Most "model routers" pick a model at call time on price or vibes ("use the cheap one here"). `model-eval-gate` inverts that: a task can only be delegated to a non-frontier model through a **named mode**, and a mode only exists because an eval against your real data cleared a strict quality bar. Everything else is refused. Retired modes return a refusal with the reason and the date. The routing table is a *governed policy*, not a lookup.
 
 ```
 $ npx tsx src/cli.ts translate "..."
 ✗ Mode "translate" is not on the allowlist.
-  or-route enforces a strict routing policy (see GOVERNANCE.md).
+  model-eval-gate enforces a strict routing policy (see GOVERNANCE.md).
   Only eval-verified modes are allowed; everything else is refused here.
 
 $ npx tsx src/cli.ts generic-cheap "..."
@@ -20,7 +20,7 @@ $ npx tsx src/cli.ts generic-cheap "..."
 
 Cheap models are genuinely good at *some* things and quietly terrible at others, and the boundary is task-shaped, not model-shaped. A model that's at frontier parity on bulk field extraction can be 20% wrong on the same extraction when a human acts on each row. The only way to know where the line is, is to run an eval on your own data — and the only way to keep that knowledge from rotting is to (a) encode the boundary where it can't be ignored and (b) re-check it as models drift.
 
-`or-route` is the thin layer that does both:
+`model-eval-gate` is the thin layer that does both:
 
 - **Modes are named for the use case, not the model** (`extract-bulk`, `filter-auto-reply`), so you can't pattern-match a model to a task type — you have to describe the task.
 - **Each mode carries `use_when` / `do_not_use_when`** tied to a documented failure, so misuse is hard.
@@ -32,12 +32,12 @@ It is **not** an eval framework (use Promptfoo / Braintrust / Harbor to *run* ev
 ## Install
 
 ```bash
-git clone https://github.com/<you>/or-route && cd or-route
+git clone https://github.com/<you>/model-eval-gate && cd model-eval-gate
 npm install
 cp .env.example .env      # add your OPENROUTER_API_KEY
 ```
 
-Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. `or-route` is OpenRouter-native (one key, many models).
+Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. `model-eval-gate` is OpenRouter-native (one key, many models).
 
 ## Use
 

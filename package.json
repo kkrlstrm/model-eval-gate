@@ -1,0 +1,21 @@
+{
+  "name": "or-route",
+  "version": "0.1.0",
+  "description": "Eval-gated model routing with an enforced allowlist — refuse to delegate to a cheaper model until a recorded eval proves it is safe for that exact task type.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["llm", "model-routing", "openrouter", "evals", "llmops", "governance"],
+  "scripts": {
+    "route": "tsx src/cli.ts",
+    "regression": "tsx eval/regression.ts",
+    "regression:baseline": "tsx eval/regression.ts --update-baseline"
+  },
+  "dependencies": {
+    "@openrouter/agent": "^0.6.0",
+    "@openrouter/sdk": "^0.12.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

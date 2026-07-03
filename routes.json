@@ -1,0 +1,92 @@
+{
+  "_schema": "or-route/1",
+  "_readme": "Eval-gated model-routing allowlist. SINGLE SOURCE OF TRUTH, read live by the CLI enforcer (src/cli.ts) and the Python port (src/router.py). Every mode is named for its USE CASE, not its model, and should exist ONLY because a recorded eval against your real data cleared a strict quality bar. Do NOT hand-add a mode without a passing eval + an evidence entry (see GOVERNANCE.md). A mode that fails a re-eval gets moved to 'retired' with a dated reason, never silently deleted. The six modes below are REALISTIC EXAMPLES to show the shape — replace them with modes your own evals justify.",
+  "staleness_warn_days": 120,
+  "provider_pin_note": "mode.provider (optional) pins OpenRouter provider routing so a PRODUCTION call runs on the same underlying endpoint/quantization the eval was scored on (closes eval->prod drift; see the Anthropic 'infrastructure-noise in agentic evals' finding). Shape: {\"order\":[\"deepinfra\"],\"allowFallbacks\":false,\"quantizations\":[\"fp8\"]}. null = unpinned (the router picks). Populate it from a served-provider value captured by an eval/regression run, then let regression assert it stays put.",
+  "modes": {
+    "extract-bulk": {
+      "model": "qwen/qwen3-235b-a22b-2507",
+      "priceIn": 0.07,
+      "priceOut": 0.10,
+      "purpose": "High-volume field extraction whose output feeds aggregate analytics.",
+      "use_when": "N > 50 rows AND output is counted/grouped/distributed downstream (not acted on per-row).",
+      "do_not_use_when": "An operator will read a single output row and make a decision from it. ~20% disagreement with the frontier anchor on judgment-laden fields (e.g. seniority on ambiguous titles).",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+      "verified_date": "2026-05-18",
+      "provider": null
+    },
+    "filter-auto-reply": {
+      "model": "google/gemini-2.5-flash-lite",
+      "priceIn": 0.10,
+      "priceOut": 0.40,
+      "purpose": "Binary autoresponder / out-of-office detection in an email reply pipeline.",
+      "use_when": "Single binary decision (auto vs not auto). High volume, low per-row stakes.",
+      "do_not_use_when": "Any multi-class classification, intent detection, or judgment task. On multi-class labeling this model produces literal pattern-matches that are semantically wrong.",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 6'",
+      "verified_date": "2026-05-18",
+      "provider": null
+    },
+    "lint-code": {
+      "model": "mistralai/codestral-2508",
+      "priceIn": 0.30,
+      "priceOut": 0.90,
+      "purpose": "Pre-pass code linter — surfaces edge-case bugs a longer frontier review may bury.",
+      "use_when": "You are about to review code AND want a fast, cheap supplemental pass. Findings MUST be re-evaluated by the orchestrator before action.",
+      "do_not_use_when": "You need the primary architecture/security review. In evals the frontier anchor caught a SQL-injection vector in real code that this model missed entirely.",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 4'",
+      "verified_date": "2026-05-18",
+      "provider": null
+    },
+    "digest-longcontext": {
+      "model": "deepseek/deepseek-v4-flash",
+      "priceIn": 0.10,
+      "priceOut": 0.20,
+      "purpose": "Entity-grounded structured digest over large multi-document context (transcripts / long docs).",
+      "use_when": "Synthesizing many long documents into structured signal (named people, topics, objections) where entity accuracy matters. Large context window, far cheaper than the frontier anchor.",
+      "do_not_use_when": "The synthesis drives a high-stakes irreversible decision with no human review — the frontier model is the floor there. For image/scanned-PDF input use a vision mode instead.",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 2'",
+      "verified_date": "2026-06-04",
+      "provider": null
+    },
+    "extract-accurate": {
+      "model": "deepseek/deepseek-v4-flash",
+      "priceIn": 0.10,
+      "priceOut": 0.20,
+      "purpose": "Higher-accuracy bulk field extraction — the precision-leaning sibling of extract-bulk.",
+      "use_when": "Bulk extraction where per-field accuracy matters more than raw throughput and latency is not the constraint. Beats the throughput model on anchor-agreement.",
+      "do_not_use_when": "You need maximum throughput / lowest latency on a huge synchronous batch — use extract-bulk there. Also NOT for single-row decisions a human acts on directly.",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1b'",
+      "verified_date": "2026-06-04",
+      "provider": null
+    },
+    "extract-multimodal": {
+      "model": "minimax/minimax-m3",
+      "priceIn": 0.30,
+      "priceOut": 1.20,
+      "purpose": "Vision extraction/transcription from a page IMAGE or scanned/image PDF whose text layer is absent.",
+      "use_when": "A scanned/image PDF or page image where a text extractor returns nothing and you need grounded content off the pixels (e.g. a roster, an agenda). Pass --image <path> (repeatable). Matched the frontier vision anchor on recall and name<->value pairing with zero hallucinated values, at a fraction of the cost.",
+      "do_not_use_when": "The page is text-extractable (a text layer already exists — the text modes are cheaper). Also NOT for a per-row value acted on without a human verify.",
+      "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 8'",
+      "verified_date": "2026-06-25",
+      "provider": null
+    }
+  },
+  "retired": {
+    "free": {
+      "retired_date": "2026-05-18",
+      "reason": "Routed to non-web models that hallucinate when asked about current events. Use the orchestrator directly."
+    },
+    "generic-cheap": {
+      "retired_date": "2026-05-18",
+      "reason": "A mode named for a model instead of a use case. Too generic; it invited misuse on single-row decisions. Replaced by the narrower extract-bulk."
+    },
+    "chat": {
+      "retired_date": "2026-05-18",
+      "reason": "The candidate hallucinated entities in ~30% of drafting outputs. Drafting stays with the orchestrator."
+    },
+    "online": {
+      "retired_date": "2026-05-18",
+      "reason": "Real-time web research stays with the orchestrator + a first-class web search tool. The plugin produced unverifiable claims in tests."
+    }
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "mode": "extract-accurate",
+  "title": "Lead field extraction (title_seniority / function / org_type)",
+  "note": "Frozen regression for the extraction modes. SYNTHETIC leads with unambiguous gold (two people would agree on every label). Guards against the mode's model silently drifting below its eval-verified agreement. Mirrors the Eval 1 / 1b schema.",
+  "k": 3,
+  "threshold": 0.66,
+  "drift_tolerance": 0.12,
+  "consistency_floor": 0.5,
+  "baseline": {
+    "meanScore": 0.967,
+    "passHatK": 0.9,
+    "model": "deepseek/deepseek-v4-flash",
+    "verified_date": "2026-07-03"
+  },
+  "input_template": "Extract three fields from the lead below.\n\nValid values:\n- title_seniority: IC | Mgr | Dir | VP | C-suite | Board | Other\n- function: Leadership | Development | Programs | Grants_Finance | Admin_Operations | Academic | Board | Other\n- org_type: K12_District | Private_School | Foundation_Scholarship | University | Nonprofit | Association | Other\n\nDefinitions:\n- Leadership = CEO/Executive Director/President/Headmaster\n- Development = fundraising, advancement, donor relations\n- Programs = program managers/coordinators\n- Grants_Finance = grants admin/financial aid/scholarship admin\n- Academic = teachers, counselors, lecturers, curriculum\n- Board = trustees, board members, chair\n- Foundation_Scholarship = any foundation, scholarship-granting entity\n\nRespond with ONLY a JSON object {\"title_seniority\": \"...\", \"function\": \"...\", \"org_type\": \"...\"} — no prose, no markdown fences.\n\nLead:\nTitle: {{title}}\nCompany: {{company}}",
+  "graders": [
+    {
+      "kind": "fieldAgreement",
+      "name": "agreement",
+      "fields": [
+        "title_seniority",
+        "function",
+        "org_type"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "lead-01",
+      "vars": {
+        "title": "Chief Executive Officer",
+        "company": "Riverside Unified School District"
+      },
+      "gold": {
+        "title_seniority": "C-suite",
+        "function": "Leadership",
+        "org_type": "K12_District"
+      }
+    },
+    {
+      "id": "lead-02",
+      "vars": {
+        "title": "Grants Coordinator",
+        "company": "Hillcrest Community Foundation"
+      },
+      "gold": {
+        "title_seniority": "IC",
+        "function": "Grants_Finance",
+        "org_type": "Foundation_Scholarship"
+      }
+    },
+    {
+      "id": "lead-03",
+      "vars": {
+        "title": "Director of Development",
+        "company": "Oakmont Preparatory Academy"
+      },
+      "gold": {
+        "title_seniority": "Dir",
+        "function": "Development",
+        "org_type": "Private_School"
+      }
+    },
+    {
+      "id": "lead-04",
+      "vars": {
+        "title": "Vice President of Advancement",
+        "company": "Lakeside University"
+      },
+      "gold": {
+        "title_seniority": "VP",
+        "function": "Development",
+        "org_type": "University"
+      }
+    },
+    {
+      "id": "lead-05",
+      "vars": {
+        "title": "Board Trustee",
+        "company": "United Youth Alliance"
+      },
+      "gold": {
+        "title_seniority": "Board",
+        "function": "Board",
+        "org_type": "Nonprofit"
+      }
+    },
+    {
+      "id": "lead-06",
+      "vars": {
+        "title": "Financial Aid Officer",
+        "company": "Summit State University"
+      },
+      "gold": {
+        "title_seniority": "IC",
+        "function": "Grants_Finance",
+        "org_type": "University"
+      }
+    },
+    {
+      "id": "lead-07",
+      "vars": {
+        "title": "Curriculum Director",
+        "company": "Glenwood School District"
+      },
+      "gold": {
+        "title_seniority": "Dir",
+        "function": "Academic",
+        "org_type": "K12_District"
+      }
+    },
+    {
+      "id": "lead-08",
+      "vars": {
+        "title": "Program Manager",
+        "company": "Bright Futures Scholarship Fund"
+      },
+      "gold": {
+        "title_seniority": "Mgr",
+        "function": "Programs",
+        "org_type": "Foundation_Scholarship"
+      }
+    },
+    {
+      "id": "lead-09",
+      "vars": {
+        "title": "Curriculum Specialist",
+        "company": "Maplewood Independent School District"
+      },
+      "gold": {
+        "title_seniority": "IC",
+        "function": "Academic",
+        "org_type": "K12_District"
+      }
+    },
+    {
+      "id": "lead-10",
+      "vars": {
+        "title": "Membership Coordinator",
+        "company": "State Counselors Association"
+      },
+      "gold": {
+        "title_seniority": "IC",
+        "function": "Admin_Operations",
+        "org_type": "Association"
+      }
+    }
+  ]
+}

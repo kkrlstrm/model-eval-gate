@@ -1,0 +1,117 @@
+{
+  "mode": "filter-auto-reply",
+  "title": "Binary autoresponder / OOO detection",
+  "note": "Frozen regression for the binary auto-reply filter. SYNTHETIC replies, unambiguous true/false gold. This mode gates a downstream pipeline, so consistency matters — pass^k (all k trials correct) is the load-bearing metric here, not just mean accuracy.",
+  "k": 3,
+  "threshold": 0.5,
+  "drift_tolerance": 0.1,
+  "consistency_floor": 0.8,
+  "baseline": {
+    "meanScore": 1,
+    "passHatK": 1,
+    "model": "google/gemini-2.5-flash-lite",
+    "verified_date": "2026-07-03"
+  },
+  "input_template": "Classify whether this email reply is an automated / out-of-office autoresponder (true) or a genuine human-written reply (false).\n\nRespond with ONLY a JSON object {\"automated_reply\": true} or {\"automated_reply\": false} — no prose, no markdown fences.\n\nReply:\n{{body}}",
+  "graders": [
+    {
+      "kind": "fieldAgreement",
+      "name": "binary",
+      "fields": [
+        "automated_reply"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "auto-01",
+      "vars": {
+        "body": "Automatic reply: I am out of the office until July 14 with limited access to email. For urgent matters please contact my assistant."
+      },
+      "gold": {
+        "automated_reply": true
+      }
+    },
+    {
+      "id": "auto-02",
+      "vars": {
+        "body": "Thank you for your message. I am currently on parental leave and will return in September. Your email will not be forwarded."
+      },
+      "gold": {
+        "automated_reply": true
+      }
+    },
+    {
+      "id": "auto-03",
+      "vars": {
+        "body": "I'm away from my desk attending a conference this week and will respond upon my return."
+      },
+      "gold": {
+        "automated_reply": true
+      }
+    },
+    {
+      "id": "auto-04",
+      "vars": {
+        "body": "This is an automated response confirming we received your inquiry. A representative will contact you shortly."
+      },
+      "gold": {
+        "automated_reply": true
+      }
+    },
+    {
+      "id": "auto-05",
+      "vars": {
+        "body": "Out of office: traveling internationally with intermittent email access until further notice."
+      },
+      "gold": {
+        "automated_reply": true
+      }
+    },
+    {
+      "id": "human-06",
+      "vars": {
+        "body": "Hi, thanks for reaching out. We're actually evaluating a few vendors right now, can you share pricing?"
+      },
+      "gold": {
+        "automated_reply": false
+      }
+    },
+    {
+      "id": "human-07",
+      "vars": {
+        "body": "Please take me off your distribution list. Not interested."
+      },
+      "gold": {
+        "automated_reply": false
+      }
+    },
+    {
+      "id": "human-08",
+      "vars": {
+        "body": "This sounds interesting. Do you have time for a quick call Thursday afternoon?"
+      },
+      "gold": {
+        "automated_reply": false
+      }
+    },
+    {
+      "id": "human-09",
+      "vars": {
+        "body": "We already use a similar tool, but check back with me next budget cycle in the fall."
+      },
+      "gold": {
+        "automated_reply": false
+      }
+    },
+    {
+      "id": "human-10",
+      "vars": {
+        "body": "Who gave you my email? I did not sign up for this."
+      },
+      "gold": {
+        "automated_reply": false
+      }
+    }
+  ]
+}

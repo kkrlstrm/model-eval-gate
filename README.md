@@ -127,4 +127,4 @@ docs/ADDING_A_MODE.md ·  docs/OBSERVATIONS.example.md
 
 ## License
 
-MIT © 2026 Kai Karlstrom
+Apache-2.0 © 2026 Kai Karlstrom

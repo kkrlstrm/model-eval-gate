@@ -34,7 +34,8 @@ import re
 import sys
 from pathlib import Path
 
-import requests
+# NOTE: `requests` is imported lazily inside _http_post — the allowlist, validation,
+# preflight, check, and explain all work with zero third-party deps (stdlib only).
 
 ROOT = Path(__file__).resolve().parent.parent
 ROUTES_PATH = ROOT / "routes.json"
@@ -206,6 +207,11 @@ def routes_consistency() -> tuple[bool, str]:
 def _http_post(payload: dict, timeout: int) -> tuple[str | None, float]:
     key = env("OPENROUTER_API_KEY")
     if not key:
+        return None, 0.0
+    try:
+        import requests  # lazy — only the actual-call path needs it
+    except ModuleNotFoundError:
+        print("[model-eval-gate] `requests` not installed — run `pip install -r requirements.txt`", file=sys.stderr)
         return None, 0.0
     payload = {**payload, "usage": {"include": True}}
     try:

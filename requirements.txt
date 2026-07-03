@@ -1,0 +1,4 @@
+# Runtime dependency for the Python port's actual model-call path only.
+# The allowlist, validation, preflight, `check`, and `explain` need nothing beyond
+# the standard library — install this only if you make real calls via router.py.
+requests>=2.31

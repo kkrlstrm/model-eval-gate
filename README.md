@@ -1,5 +1,8 @@
 # model-eval-gate
 
+<!-- portfolio-status -->
+**Status:** Reference implementation — extracted from a private production GTM system; tenant data, provider adapters, and company-specific policy stay private. · **Layer:** Quality & policy enforcement · **[Portfolio map ›](https://github.com/kkrlstrm)**
+
 **A circuit breaker for cheap-model delegation.**
 
 Agents shouldn't route work to a cheaper model just because it's cheap, fast, or "probably good enough." A non-frontier model gets used only when it has *earned* a narrow permission: a named task mode, backed by an eval on your real data, with explicit `use_when` / `do_not_use_when` boundaries. Everything else stays with the frontier / orchestrator model.
@@ -205,3 +208,15 @@ CI (`.github/workflows/ci.yml`) runs the offline gate on every push/PR. The live
 ## License
 
 Apache-2.0 © 2026 Kai Karlstrom
+
+---
+
+<!-- portfolio-footer -->
+## Where this fits
+
+Part of a portfolio of **governed, AI-native GTM systems** — reference implementations and reusable patterns extracted from a private production stack. In that system this is the eval-backed gate that decides whether a call may be delegated to a cheaper model at all.
+
+**Full portfolio map → [github.com/kkrlstrm](https://github.com/kkrlstrm)**
+
+Works with:
+- [cc-logger](https://github.com/kkrlstrm/cc-logger) — observes real delegation usage

@@ -1,13 +1,16 @@
-# model-eval-gate — governed delegation for AI agents
+# model-eval-gate — a delegation policy engine for AI agents
 
 <!-- portfolio-status -->
 **Status:** Reference implementation — extracted from a private production GTM system; tenant data, provider adapters, and company-specific policy stay private. · **Layer:** Quality & policy enforcement · **[Portfolio map ›](https://github.com/kkrlstrm)**
 
-**Know which agent workloads can safely leave the frontier model — and prove it.**
+> **Agents can plan freely. They cannot downgrade freely.**
 
-model-eval-gate observes the work your agents already do, identifies which of it is worth
-moving, turns passing evals into narrow executable permissions, and flags drift or calls
-that bypassed policy.
+model-eval-gate turns observed agent work and real evaluations into **versioned delegation
+policy** that runtimes such as OpenClaw can enforce.
+
+**Built for teams operating persistent, multi-agent, scheduled, or high-volume agent
+workflows** — where an unevaluated model downgrade can quietly become production behaviour.
+If you are running a single-model chatbot, you do not need this.
 
 **Cheaper is not a permission.**
 
@@ -24,7 +27,7 @@ $ meg workload list
      310  claim-summary-draft     billing=subscription  eligible=NO
            └─ subscription-billed: marginal cost is ~$0, so routing it would save $0
 
-$ meg eval scaffold supplier-page-digest      # → earned a low-stakes, aggregate-only permission
+$ meg eval scaffold supplier-page-digest      # → a reviewable eval spec; a human approves the resulting policy
 $ meg observe coverage
    3 provider requests did NOT come through the recorder — something bypassed the gate
 ```
@@ -43,6 +46,56 @@ decision maintained after it is made. See [integrations/](integrations/) — the
 plugin is enforcing today.
 
 > Agents can plan freely. They cannot downgrade freely.
+
+## Built for agent runtimes
+
+OpenClaw, Hermes and other frameworks decide **what work to perform**. model-eval-gate
+supplies the policy answer *before* they select a smaller worker: **approved**, **frontier
+required**, or **insufficient evidence**.
+
+An adapter is a thin translation over one decision function
+([`meg/policy.py:decide()`](meg/policy.py)) — adapters hold no policy of their own, so a
+new runtime cannot ship a slightly different interpretation of the rules.
+
+**OpenClaw — enforcing today.** `before_model_resolve` runs before the session model is
+resolved and may return `{ providerOverride, modelOverride }`; returning nothing means no
+override — which maps onto this policy exactly, because a refusal *is* "return nothing."
+
+```ts
+import { register } from "model-eval-gate/integrations/openclaw";
+
+export default (api) =>
+  register(api, {
+    requireFullMetadata: true, // unattended: an unevidenced constraint refuses
+    workloadMap: {
+      "nightly-enrichment": { mode: "extract-bulk", meta: { rows: 5000, single_row_decision: false } },
+    },
+  });
+```
+
+It only ever moves a turn **down** to a model that earned a permission for that workload —
+never upgrades, never picks between frontier models, never substitutes on price.
+
+**What it does today, precisely:** it returns `modelOverride` for approved work, records its
+policy decisions, and emits usage diagnostics. It does **not** yet persist OpenClaw calls
+into the telemetry store, and full provider-ledger reconciliation remains a runtime
+integration step. A `nudge` currently **surfaces a warning to the runtime/operator** — it is
+not injected into the prompt; that needs a `before_prompt_build` integration. And because
+OpenClaw's `providerOverride` takes a provider *name*, a multi-field provider pin
+(order/fallbacks/quantization) is reduced to its first entry, so pin fidelity is weaker here
+than through the Python path.
+
+**Hermes — advisory only, and it says so.** Hermes' `pre_llm_call` hook currently has its
+result treated as user-message context, so a plugin cannot cleanly override the model;
+doing it today means monkey-patching the agent loop, which is brittle across releases
+([upstream issue](https://github.com/NousResearch/hermes-agent/issues/23739)). The adapter
+therefore **decides and records but does not enforce**, rather than monkey-patching to look
+like it works. It becomes enforcing when the upstream hook can return an override, with no
+policy change.
+
+**Anything else** — implement four capabilities (pre-call hook, a way to tag work, model
+override, post-call usage) and the adapter is ~20 lines. See
+[integrations/](integrations/).
 
 ## The failure mode
 
@@ -148,25 +201,6 @@ claim-summary-draft    frontier  $12.55 → candidate  $0.29   ratio 43.5x
 
 A gate that can't tell these apart reports savings that don't exist.
 
-### Guardrails, each from a bug that shipped silently
-
-| guardrail | what it prevents |
-|---|---|
-| `meg observe coverage` | a script calling the provider **around** the gate, on a model nobody evaluated |
-| hard filters before price ranking | a cheaper model that can't meet the output contract being ranked at all |
-| negative/absent price → infinite | router pseudo-models publishing `-1` and ranking first at *minus* $108M |
-| free tiers excluded by default | a `$0` rank winning every comparison, on endpoints that rate-limit so hard the eval doesn't predict production |
-| `validate()` before any spend | a grader that condemns every arm because it's measuring **itself** |
-| cross-family judge panels | a judge inflating its own family's arm (measured at **+0.32** on a 1–5 scale) |
-| unknown stakes ⇒ treated as high | a cheap model quietly making per-row decisions nobody audited |
-| **graduated actions** — `monitor` / `nudge` / `refuse` / `block` | a binary gate having only "yes" and "no": `monitor` rolls a mode out by recording what it *would* have done; `nudge` proceeds but hands the model the reason it is questionable |
-| **posture** — attended vs unattended | "nobody objected" being read as evidence at 3am. Attended nudges on an unproven constraint; unattended refuses |
-| **hash-chained audit log** | a decision quietly reclassified after something went wrong — `meg.audit.verify()` locates the first edited line |
-| `gates/verify_no_real_data.py` | this repo breaking its own "ships no real data" promise, which until it existed was enforced by nobody |
-| pre-commit hook, scanning the **index** | a credential reaching history at all — CI catches a leak before it merges, but not before it exists, and a key in a commit needs a rotation rather than an edit |
-| `gates/verify_doc_refs.py` | a doc telling an agent to run a file that no longer exists, so it improvises the thing the helper prevented |
-| `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
-
 ### Storage
 
 SQLite by default (`~/.model-eval-gate/meg.db`, zero setup). Point `MEG_DB` or `--db` at a
@@ -205,48 +239,13 @@ A mode without a spec is a **hypothesis with no maintenance behind it**. Treat t
 as "someone else measured this once"; confirm before relying on them. Contributions of
 specs (with fictionalised corpora) are the most useful PR you can send.
 
-## Plug it into your agent framework
-
-An adapter is a thin translation over one decision function
-([`meg/policy.py:decide()`](meg/policy.py)) — adapters hold no policy of their own, so a
-new runtime cannot ship a slightly different interpretation of the rules.
-
-**OpenClaw — enforcing today.** `before_model_resolve` runs before the session model is
-resolved and may return `{ providerOverride, modelOverride }`; returning nothing means no
-override — which maps onto this policy exactly, because a refusal *is* "return nothing."
-
-```ts
-import { register } from "model-eval-gate/integrations/openclaw";
-
-export default (api) =>
-  register(api, {
-    requireFullMetadata: true, // unattended: an unevidenced constraint refuses
-    workloadMap: {
-      "nightly-enrichment": { mode: "extract-bulk", meta: { rows: 5000, single_row_decision: false } },
-    },
-  });
-```
-
-It only ever moves a turn **down** to a model that earned a permission for that workload —
-never upgrades, never picks between frontier models, never substitutes on price.
-
-**Hermes — advisory only, and it says so.** Hermes' `pre_llm_call` hook currently has its
-result treated as user-message context, so a plugin cannot cleanly override the model;
-doing it today means monkey-patching the agent loop, which is brittle across releases
-([upstream issue](https://github.com/NousResearch/hermes-agent/issues/23739)). The adapter
-therefore **decides and records but does not enforce**, rather than monkey-patching to look
-like it works. It becomes enforcing when the upstream hook can return an override, with no
-policy change.
-
-**Anything else** — implement four capabilities (pre-call hook, a way to tag work, model
-override, post-call usage) and the adapter is ~20 lines. See
-[integrations/](integrations/).
-
 ## Honest limits
 
 This is a **reference implementation** with a fail-closed wrapper and a governance loop —
-not a universal control plane. Four limits, all reported by the tool itself
-(`meg gate check`, `meg observe coverage`):
+a *delegation policy engine*, not a universal agent control plane. That is the destination,
+and reaching it needs three things this does not yet have: a hardened egress boundary,
+persisted framework telemetry, and broader adapters. Five limits, all reported by the tool
+itself (`meg gate check`, `meg observe coverage`):
 
 1. **Enforcement covers calls that pass through it.** A tool shelling out to a provider, or
    a sub-process with its own API key, bypasses it. That is why coverage reconciliation
@@ -260,6 +259,10 @@ not a universal control plane. Four limits, all reported by the tool itself
    checks the mode name and nothing else; eligibility lives in prose that no runtime reads.
 4. **4 of 6 bundled modes have no regression spec.** A mode without one is a verdict nobody
    re-measures.
+5. **The OpenClaw adapter enforces but does not yet reconcile.** It returns `modelOverride`
+   and records decisions; it does not persist OpenClaw calls to the telemetry store, does
+   not inject nudge text into the prompt, and reduces a multi-field provider pin to its
+   first provider name. Each is a runtime integration step, not a policy gap.
 
 ## Scope: a gate, not a sandbox
 
@@ -291,6 +294,29 @@ To make it a real control plane rather than a governed helper, **make it the onl
    pass        fail
    keep mode   retire with a dated reason
 ```
+
+## Engineering integrity
+
+Not the buyer value — the reason to trust the buyer value. Each row is a bug that
+shipped silently before the guard existed.
+
+
+| guardrail | what it prevents |
+|---|---|
+| `meg observe coverage` | a script calling the provider **around** the gate, on a model nobody evaluated |
+| hard filters before price ranking | a cheaper model that can't meet the output contract being ranked at all |
+| negative/absent price → infinite | router pseudo-models publishing `-1` and ranking first at *minus* $108M |
+| free tiers excluded by default | a `$0` rank winning every comparison, on endpoints that rate-limit so hard the eval doesn't predict production |
+| `validate()` before any spend | a grader that condemns every arm because it's measuring **itself** |
+| cross-family judge panels | a judge inflating its own family's arm (measured at **+0.32** on a 1–5 scale) |
+| unknown stakes ⇒ treated as high | a cheap model quietly making per-row decisions nobody audited |
+| **graduated actions** — `monitor` / `nudge` / `refuse` / `block` | a binary gate having only "yes" and "no": `monitor` rolls a mode out by recording what it *would* have done; `nudge` proceeds but hands the model the reason it is questionable |
+| **posture** — attended vs unattended | "nobody objected" being read as evidence at 3am. Attended nudges on an unproven constraint; unattended refuses |
+| **hash-chained audit log** | a decision quietly reclassified after something went wrong — `meg.audit.verify()` locates the first edited line |
+| `gates/verify_no_real_data.py` | this repo breaking its own "ships no real data" promise, which until it existed was enforced by nobody |
+| pre-commit hook, scanning the **index** | a credential reaching history at all — CI catches a leak before it merges, but not before it exists, and a key in a commit needs a rotation rather than an edit |
+| `gates/verify_doc_refs.py` | a doc telling an agent to run a file that no longer exists, so it improvises the thing the helper prevented |
+| `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
 
 ## Install
 

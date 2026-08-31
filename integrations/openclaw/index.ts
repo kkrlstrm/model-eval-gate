@@ -19,10 +19,13 @@
  * substitutes on the basis of price. If no mode is earned, it returns nothing
  * and the turn runs on whatever OpenClaw already resolved.
  *
- * It also observes. `llm_output` carries usage and the resolved token budget,
- * and `model_call_started` / `model_call_ended` carry sanitized provider/model
- * call metadata — enough to reconcile what the gate authorised against what the
- * provider actually billed, which is how a bypass becomes visible.
+ * WHAT IT DOES TODAY, PRECISELY. It returns `modelOverride` for approved work,
+ * records its policy decisions, and emits usage diagnostics from `llm_output`.
+ * It does NOT persist OpenClaw calls into the telemetry store, so provider-ledger
+ * reconciliation (`meg observe coverage`) does not yet see them — that is a
+ * runtime integration step, not a policy change. The hooks needed for it exist
+ * (`llm_output` carries usage; `model_call_started`/`model_call_ended` carry
+ * sanitized call metadata); the wiring does not.
  *
  * WHAT TAGS A TURN. A workload tag has to come from somewhere the agent author
  * controls. Resolution order:
@@ -191,9 +194,10 @@ export function decide(
   }
 
   // Graduated response, mirroring meg/policy.py. A `nudge` still delegates, but
-  // hands back the reason it is questionable — in an agent runtime that becomes
-  // context the model reads and self-corrects on, which costs nothing when the
-  // model was right and saves a bad call when it was not.
+  // carries the reason it is questionable. NOTE: this adapter SURFACES that note
+  // to the runtime/operator via console.warn — it does not inject it into the
+  // prompt. Making the model itself self-correct on it needs a
+  // `before_prompt_build` integration, which is not wired here.
   const notes: string[] = [];
   let action = 'allow';
   if (unchecked.length) {
@@ -269,8 +273,8 @@ export function register(api: { on: Function }, options: MegPluginOptions = {}) 
     const line = `[model-eval-gate] ${verdict}  mode=${d.mode}  ${d.reason}`;
     if (log) log(line, d);
     else console.info(line);
-    // Nudge notes are the self-correction channel: surface them rather than
-    // burying them, because a warning nobody sees is the same as no warning.
+    // Surfaced to the operator, not injected into the prompt (see decide()).
+    // A warning nobody sees is the same as no warning, so these are warn-level.
     for (const n of d.notes ?? []) console.warn(`[model-eval-gate] ${d.mode}: ${n}`);
   };
 
@@ -293,11 +297,25 @@ export function register(api: { on: Function }, options: MegPluginOptions = {}) 
     }
 
     const out: Json = { modelOverride: d.model };
-    // A provider pin exists so production runs on the endpoint the eval was
-    // scored on; drop it into providerOverride only when the policy names one.
+    // FIDELITY LIMIT, worth knowing before relying on a pin here. A provider pin
+    // exists so production runs on the endpoint the eval was scored on, and it
+    // can carry order + allowFallbacks + quantizations. OpenClaw's
+    // `providerOverride` takes a provider NAME, so only the first entry survives
+    // and fallbacks/quantization cannot be expressed — the pin is weaker through
+    // this path than through the Python router. Warned once so a pinned mode
+    // does not quietly run somewhere the eval never scored.
     if (d.provider && typeof d.provider === 'object' && 'order' in (d.provider as Json)) {
       const order = (d.provider as Json).order as string[] | undefined;
-      if (order?.length) out.providerOverride = order[0];
+      if (order?.length) {
+        out.providerOverride = order[0];
+        if (order.length > 1 || 'quantizations' in (d.provider as Json)) {
+          console.warn(
+            `[model-eval-gate] mode=${d.mode} has a multi-field provider pin; ` +
+              `OpenClaw accepts a provider name only, so '${order[0]}' is applied and ` +
+              `fallback/quantization constraints are NOT enforced on this path.`,
+          );
+        }
+      }
     }
     return out;
   });

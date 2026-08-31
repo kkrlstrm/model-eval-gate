@@ -22,6 +22,9 @@ bypass.
 | 3 | The ability to **override** the model from that hook | enforce the answer |
 | 4 | Post-call usage/telemetry | reconcile authorised vs billed → detect bypass |
 
+Capability 4 is what the OpenClaw adapter has only partially: it *observes* usage but does
+not yet persist it, so reconciliation is not wired end to end.
+
 Given those, an adapter is roughly twenty lines:
 
 ```python
@@ -70,8 +73,21 @@ export default (api) =>
 
 The plugin only ever moves a turn **down** to a smaller model that has earned a permission
 for that workload. It never upgrades, never chooses between frontier models, and never
-substitutes on price. It also subscribes to `llm_output` so authorised turns can be
-reconciled against what the provider actually billed.
+substitutes on price.
+
+**Scope of the current adapter, stated precisely** — it returns `modelOverride` for approved
+work, records its policy decisions, and emits usage diagnostics from `llm_output`. Three
+things it does *not* do yet, each a runtime integration step rather than a policy change:
+
+- it does **not persist** OpenClaw calls into the telemetry store, so provider-ledger
+  reconciliation (`meg observe coverage`) does not yet see them;
+- a `nudge` **surfaces a warning to the runtime/operator**; it is not injected into the
+  prompt. Doing that needs a `before_prompt_build` integration, at which point the note
+  becomes context the model can self-correct on;
+- OpenClaw's `providerOverride` takes a provider **name**, so a multi-field provider pin
+  (order / allowFallbacks / quantizations) is reduced to its first entry. The pin exists to
+  make production run on the endpoint the eval was scored on, and a name alone does not
+  guarantee that — pin fidelity is weaker here than through the Python path.
 
 ### Hermes — advisory only, and why
 

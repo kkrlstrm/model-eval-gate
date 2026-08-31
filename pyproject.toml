@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "model-eval-gate"
 version = "2.0.0.dev0"
-description = "Evidence-first delegation policy for agent runtimes. Turn observed work and real evals into versioned permissions to use smaller models."
+description = "Versioned, eval-backed delegation policy for AI agents—prove what can leave the frontier model, enforce it in runtimes, and detect drift."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

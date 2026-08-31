@@ -1,7 +1,7 @@
 {
   "name": "model-eval-gate",
   "version": "0.1.0",
-  "description": "Evidence-first delegation policy for agent runtimes. Turn observed work and real evals into versioned permissions to use smaller models.",
+  "description": "Versioned, eval-backed delegation policy for AI agents\u2014prove what can leave the frontier model, enforce it in runtimes, and detect drift.",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": [

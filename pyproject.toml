@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "model-eval-gate"
 version = "2.0.0.dev0"
-description = "Evidence-first delegation control for LLM work: observe what you do, propose candidates, eval on your data, gate what may move."
+description = "Evidence-first delegation policy for agent runtimes. Turn observed work and real evals into versioned permissions to use smaller models."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Kai Karlstrom" }]
-keywords = ["llm", "routing", "evals", "openrouter", "telemetry", "claude-code", "codex"]
+keywords = ["llm", "agents", "delegation", "policy", "evals", "openrouter", "openclaw", "telemetry", "governance", "claude-code", "codex"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",

@@ -19,7 +19,7 @@ observe real work → find eligible workloads → evaluate candidates on real ta
    → publish a narrow permission → enforce it → detect drift and bypass
 ```
 
-Three outcomes it produces, in its own words:
+**Illustrative output** — the three outcomes it produces (fictional data; see [Data policy](#data-policy)):
 
 ```
 $ meg workload list
@@ -45,8 +45,6 @@ calls and measure quality. This governs the **decision to delegate**, and keeps 
 decision maintained after it is made. See [integrations/](integrations/) — the OpenClaw
 plugin is enforcing today.
 
-> Agents can plan freely. They cannot downgrade freely.
-
 ## Built for agent runtimes
 
 OpenClaw, Hermes and other frameworks decide **what work to perform**. model-eval-gate
@@ -62,7 +60,9 @@ resolved and may return `{ providerOverride, modelOverride }`; returning nothing
 override — which maps onto this policy exactly, because a refusal *is* "return nothing."
 
 ```ts
-import { register } from "model-eval-gate/integrations/openclaw";
+// Source install — import from a checkout. There is no published package export
+// for this path yet (see Honest limits), so a bare specifier would not resolve.
+import { register } from "./path/to/model-eval-gate/integrations/openclaw/index.ts";
 
 export default (api) =>
   register(api, {
@@ -73,11 +73,14 @@ export default (api) =>
   });
 ```
 
-It only ever moves a turn **down** to a model that earned a permission for that workload —
-never upgrades, never picks between frontier models, never substitutes on price.
+It only overrides a turn with **the model named by an approved mode**. It never selects a
+model on price and never substitutes an unapproved one. (It does not compare that model
+against OpenClaw's configured default, so it cannot claim the override is always a
+*downgrade* — only that the destination was approved for this workload.)
 
-**What it does today, precisely:** it returns `modelOverride` for approved work, records its
-policy decisions, and emits usage diagnostics. It does **not** yet persist OpenClaw calls
+**What it does today, precisely:** it returns `modelOverride` for approved work, **logs** its
+policy decisions (console or a caller-supplied `log`, not the persistent hash-chained audit
+log), and emits usage diagnostics. It does **not** yet persist OpenClaw calls
 into the telemetry store, and full provider-ledger reconciliation remains a runtime
 integration step. A `nudge` currently **surfaces a warning to the runtime/operator** — it is
 not injected into the prompt; that needs a `before_prompt_build` integration. And because
@@ -259,7 +262,10 @@ itself (`meg gate check`, `meg observe coverage`):
    checks the mode name and nothing else; eligibility lives in prose that no runtime reads.
 4. **4 of 6 bundled modes have no regression spec.** A mode without one is a verdict nobody
    re-measures.
-5. **The OpenClaw adapter enforces but does not yet reconcile.** It returns `modelOverride`
+5. **The plugin is source, not a published package.** `package.json` declares no `exports`,
+   `main` or build step, so the adapter is imported from a checkout rather than installed
+   as `model-eval-gate/integrations/openclaw`. Packaging it is a real step, not a rename.
+6. **The OpenClaw adapter enforces but does not yet reconcile.** It returns `modelOverride`
    and records decisions; it does not persist OpenClaw calls to the telemetry store, does
    not inject nudge text into the prompt, and reduces a multi-field provider pin to its
    first provider name. Each is a runtime integration step, not a policy gap.

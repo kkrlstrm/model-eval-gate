@@ -13,14 +13,17 @@
  * (`before_model_resolve` replaced the deprecated `before_agent_start` in
  * OpenClaw 2026.4.21.)
  *
- * The direction of the override matters. This plugin only ever moves a turn
- * DOWN to a smaller model that has earned a permission for that workload. It
- * never upgrades, never picks between frontier models, and never silently
- * substitutes on the basis of price. If no mode is earned, it returns nothing
- * and the turn runs on whatever OpenClaw already resolved.
+ * WHAT THE OVERRIDE IS. This plugin overrides a turn only with the model NAMED
+ * BY AN APPROVED MODE. It never selects a model on price and never substitutes
+ * an unapproved one. It does NOT compare that model against OpenClaw's
+ * configured default, so it cannot claim the override is always a *downgrade* --
+ * only that the destination was approved for this workload. If no mode is
+ * earned it returns nothing, and the turn runs on whatever OpenClaw resolved.
  *
  * WHAT IT DOES TODAY, PRECISELY. It returns `modelOverride` for approved work,
- * records its policy decisions, and emits usage diagnostics from `llm_output`.
+ * LOGS its policy decisions (console, or a caller-supplied `log` -- not the
+ * persistent hash-chained audit log in meg/audit.py), and emits usage
+ * diagnostics from `llm_output`.
  * It does NOT persist OpenClaw calls into the telemetry store, so provider-ledger
  * reconciliation (`meg observe coverage`) does not yet see them — that is a
  * runtime integration step, not a policy change. The hooks needed for it exist
@@ -79,7 +82,11 @@ export interface MegPluginOptions {
    * a constraint with no evidence behind it has not been satisfied.
    */
   requireFullMetadata?: boolean;
-  /** Log every decision (allow and refuse). Default true — silent policy is unauditable. */
+  /**
+   * Log every decision (allow and refuse). Default true — silent policy is
+   * unauditable. NOTE: this is console/custom logging, NOT the persistent
+   * hash-chained audit log; pass `log` to route decisions into your own store.
+   */
   audit?: boolean;
   /** agentId or skill name -> declaration, for tagging without touching agent code. */
   workloadMap?: Record<string, MegDeclaration>;

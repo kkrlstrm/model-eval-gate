@@ -58,7 +58,9 @@ nothing means no override. That maps onto this policy exactly, because a refusal
 "return nothing." (It replaced the deprecated `before_agent_start` in OpenClaw 2026.4.21.)
 
 ```ts
-import { register } from "model-eval-gate/integrations/openclaw";
+// Source install — imported from a checkout. There is no published package
+// export for this path yet, so a bare specifier would not resolve.
+import { register } from "./path/to/model-eval-gate/integrations/openclaw/index.ts";
 
 export default (api) =>
   register(api, {
@@ -71,19 +73,23 @@ export default (api) =>
   });
 ```
 
-The plugin only ever moves a turn **down** to a smaller model that has earned a permission
-for that workload. It never upgrades, never chooses between frontier models, and never
-substitutes on price.
+The plugin only overrides a turn with **the model named by an approved mode**. It never
+selects a model on price and never substitutes an unapproved one. It does not compare that
+model against OpenClaw's configured default, so it cannot claim the override is always a
+*downgrade* — only that the destination was approved for this workload.
 
 **Scope of the current adapter, stated precisely** — it returns `modelOverride` for approved
-work, records its policy decisions, and emits usage diagnostics from `llm_output`. Three
-things it does *not* do yet, each a runtime integration step rather than a policy change:
+work, **logs** its policy decisions (console, or a caller-supplied `log`; not the persistent
+hash-chained audit log), and emits usage diagnostics from `llm_output`. Four things it does
+*not* do yet, each a runtime integration step rather than a policy change:
 
 - it does **not persist** OpenClaw calls into the telemetry store, so provider-ledger
   reconciliation (`meg observe coverage`) does not yet see them;
 - a `nudge` **surfaces a warning to the runtime/operator**; it is not injected into the
   prompt. Doing that needs a `before_prompt_build` integration, at which point the note
   becomes context the model can self-correct on;
+- it is **source, not a published package** — `package.json` declares no `exports` or build
+  step, so it is imported from a checkout;
 - OpenClaw's `providerOverride` takes a provider **name**, so a multi-field provider pin
   (order / allowFallbacks / quantizations) is reduced to its first entry. The pin exists to
   make production run on the endpoint the eval was scored on, and a name alone does not

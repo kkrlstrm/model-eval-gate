@@ -1,16 +1,21 @@
 {
   "name": "model-eval-gate",
   "version": "0.1.0",
-  "description": "A circuit breaker for cheap-model delegation. An eval-backed allowlist that lets agents use non-frontier models only where your own evals prove they are safe for that exact task, and refuses every other downgrade by default.",
+  "description": "Evidence-first delegation policy for agent runtimes. Turn observed work and real evals into versioned permissions to use smaller models.",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": [
     "llm",
-    "model-routing",
-    "openrouter",
+    "agents",
+    "delegation",
+    "policy",
     "evals",
-    "llmops",
-    "governance"
+    "openrouter",
+    "openclaw",
+    "telemetry",
+    "governance",
+    "claude-code",
+    "codex"
   ],
   "scripts": {
     "route": "tsx src/cli.ts",

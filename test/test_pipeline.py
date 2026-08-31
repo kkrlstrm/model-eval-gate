@@ -34,6 +34,7 @@ from meg.workload.cluster import WorkloadClass, from_calls, from_harness, counte
 from meg.workload.propose import propose, filter_capable, _price, _is_free_tier
 from meg.scaffold import SchemaGrader, RegexGrader, validate, score_panel
 from meg.policy import decide, load_routes
+from meg import audit as meg_audit
 
 FAILS: list[str] = []
 
@@ -258,20 +259,137 @@ def test_policy_parity_with_ts() -> None:
     cases = json.loads((root / "test" / "policy_cases.json").read_text())
     routes = load_routes(root / "routes.json")
     for c in cases:
+        # audit_path=False: tests must never write into the user's real audit log
         d = decide(c["mode"], c["meta"], routes=routes,
-                   require_full_metadata=c.get("strict", False))
+                   require_full_metadata=c.get("strict", False), audit_path=False)
         check(f"policy: {c['name'][:52]}", d.allowed, c["expect"]["allowed"])
         want = c["expect"].get("reason_contains")
         if want:
             truthy(f"  reason mentions {want!r}", want.lower() in d.reason.lower())
+        if act := c["expect"].get("action"):
+            check(f"  action == {act}", d.action, act)
 
 
 def test_policy_fails_closed() -> None:
     """No readable policy => nothing is earned. Never a permissive default."""
-    d = decide("extract-bulk", {"rows": 9999},
+    d = decide("extract-bulk", {"rows": 9999}, audit_path=False,
                routes={"modes": {}, "retired": {}, "_error": "unreadable"})
     check("unreadable policy refuses", d.allowed, False)
+    check("and blocks, not merely refuses", d.action, "block")
     truthy("says why", "policy unavailable" in d.reason)
+
+
+def test_graduated_actions_and_posture() -> None:
+    """Binary allow/refuse throws away the two useful middle states.
+
+    `monitor` = recorded, not enforced (how you roll a mode out safely).
+    `nudge`   = proceeds, but hands back why it is questionable.
+    Posture decides what an UNPROVEN condition means: attended nudges,
+    unattended refuses, because 'nobody objected' is not evidence at 3am."""
+    full = {"rows": 5000, "single_row_decision": False, "stakes": "low",
+            "input_type": "text"}
+    a = decide("extract-bulk", full, audit_path=False)
+    check("full metadata allows", a.action, "allow")
+    truthy("and proceeds", a.proceeds)
+
+    n = decide("extract-bulk", {}, posture="attended", audit_path=False)
+    check("attended + unproven -> nudge", n.action, "nudge")
+    truthy("nudge still proceeds", n.proceeds)
+    truthy("nudge explains itself", any("UNVERIFIED" in x for x in n.notes))
+
+    u = decide("extract-bulk", {}, posture="unattended", audit_path=False)
+    check("unattended + unproven -> refuse", u.action, "refuse")
+    check("and does not proceed", u.proceeds, False)
+
+    m = decide("extract-bulk", full, observe_only=True, audit_path=False)
+    check("observe_only -> monitor", m.action, "monitor")
+    truthy("monitor still proceeds (nothing enforced)", m.proceeds)
+
+    b = decide("generic-cheap", {}, audit_path=False)
+    check("retired -> block", b.action, "block")
+    check("block does not proceed", b.proceeds, False)
+
+
+def test_audit_chain_detects_tampering() -> None:
+    """A governance tool whose decisions can be edited afterwards proves nothing.
+
+    The realistic threat is not deletion, it is a decision quietly reclassified
+    after something went wrong. A hash chain makes that detectable."""
+    p = Path(tempfile.mkdtemp()) / "audit.jsonl"
+    for meta in ({"rows": 5000, "single_row_decision": False, "stakes": "low",
+                  "input_type": "text"}, {"rows": 2}, {}):
+        decide("extract-bulk", meta, audit_path=p)
+    v = meg_audit.verify(p)
+    check("chain intact when untouched", v["ok"], True)
+    check("all decisions recorded", v["lines"], 3)
+
+    lines = p.read_text().splitlines()
+    rec = json.loads(lines[1])
+    rec["allowed"] = True
+    rec["reason"] = "looks fine actually"
+    lines[1] = json.dumps(rec)
+    p.write_text("\n".join(lines) + "\n")
+
+    v2 = meg_audit.verify(p)
+    check("edit is detected", v2["ok"], False)
+    check("and located", v2["broken_at"], 2)
+
+    s = meg_audit.summary(p)
+    truthy("summary counts decisions", s["allowed"] + s["refused"] == 3)
+
+
+def test_audit_never_raises_into_a_call() -> None:
+    """An audit failure must not block a delegation decision. A gate that goes
+    down because its logger's disk filled has failed closed on availability
+    grounds, which is worse than a visible gap in the log."""
+    bad = Path("/nonexistent-dir-for-meg-test/nested/audit.jsonl")
+    h = meg_audit.append({"allowed": True, "mode": "x"}, path=bad)
+    check("append returns None instead of raising", h, None)
+    d = decide("extract-bulk", {"rows": 5000, "single_row_decision": False,
+                                "stakes": "low", "input_type": "text"},
+               audit_path=bad)
+    check("decision still made", d.allowed, True)
+
+
+def test_data_gate_discriminates() -> None:
+    """The repo's own tripwire gets the same treatment it demands of graders.
+
+    A gate that only ever passes is indistinguishable from no gate. So it is
+    validated the way `validate()` validates a grader: it must flag every planted
+    credential and flag none of the documentation placeholders."""
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "vnrd", root / "gates" / "verify_no_real_data.py")
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+
+    must_flag = [
+        ("openrouter key", 'K = "sk-or-v1-abcdef0123456789abcdef"'),  # meg-gate: fixture
+        ("gitlab token", "token: glpat-AbCdEfGhIjKlMnOpQrSt"),  # meg-gate: fixture
+        ("github token", "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"),  # meg-gate: fixture
+        ("aws key id", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"),  # meg-gate: fixture
+        ("private key", "-----BEGIN RSA PRIVATE KEY-----"),  # meg-gate: fixture
+        ("managed host", "host = ep-fictional-name-1234.us-east-2.aws.neon.tech"),  # meg-gate: fixture
+        ("home path", 'ROOT = "/Users/someone/projects/thing"'),  # meg-gate: fixture
+    ]
+    for name, line in must_flag:
+        truthy(f"gate flags {name}", bool(g.scan_text("some/file.py", line)))
+
+    must_not_flag = [
+        ("doc placeholder DSN", "postgresql://user:pass@host:5432/db"),
+        ("fictional model id", 'model: "bellwether/bw-flash"'),
+        ("repo-relative path", 'see meg/policy.py for the decision function'),
+        ("prompt fingerprint", 'prompt_sha = "a1b2c3d4e5f6"'),
+        ("tilde path", "db lives at ~/.model-eval-gate/meg.db"),
+    ]
+    for name, line in must_not_flag:
+        check(f"gate ignores {name}", g.scan_text("some/file.py", line), [])
+
+    # ...and it must still scan its own file for real credentials, not skip it
+    truthy("gate scans itself for credentials",
+           bool(g.scan_text("gates/verify_no_real_data.py",
+                            '  KEY = "sk-or-v1-abcdef0123456789abcdef"')))  # meg-gate: fixture
 
 
 def test_postgres_backend() -> None:
@@ -342,6 +460,10 @@ def main() -> int:
     print("call clustering");             test_calls_cluster_by_tag()
     print("policy parity (shared cases)"); test_policy_parity_with_ts()
     print("policy fails closed");         test_policy_fails_closed()
+    print("graduated actions/posture");    test_graduated_actions_and_posture()
+    print("audit chain");                 test_audit_chain_detects_tampering()
+    print("audit never raises");          test_audit_never_raises_into_a_call()
+    print("data gate discriminates");      test_data_gate_discriminates()
     print("postgres backend");            test_postgres_backend()
     print(f"\n{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failing check(s)")
     return 1 if FAILS else 0

@@ -61,6 +61,10 @@ interface Decision {
   violations?: string[];
   unchecked?: string[];
   stale_days?: number | null;
+  /** 'allow' | 'monitor' | 'nudge' | 'refuse' | 'block' — see meg/policy.py */
+  action?: string;
+  /** For 'nudge': text worth surfacing to the model so it self-corrects. */
+  notes?: string[];
 }
 
 export interface MegPluginOptions {
@@ -135,11 +139,13 @@ export function decide(
   meta: Json,
   routes: Json,
   requireFullMetadata = false,
+  staleAfterDays = 120,
 ): Decision {
   if (routes._error) {
     return {
       allowed: false,
       mode,
+      action: 'block',
       reason: `policy unavailable — refusing all delegation (${routes._error})`,
     };
   }
@@ -149,6 +155,7 @@ export function decide(
     return {
       allowed: false,
       mode,
+      action: 'block',
       reason: `mode '${mode}' is RETIRED (${r.retired_date ?? '?'}): ${r.reason ?? 'no reason recorded'}`,
     };
   }
@@ -159,6 +166,7 @@ export function decide(
     return {
       allowed: false,
       mode,
+      action: 'block',
       reason: `mode '${mode}' is not on the allowlist. Earned modes: ${known}. Unearned work stays on the frontier model.`,
     };
   }
@@ -174,15 +182,39 @@ export function decide(
     return {
       allowed: false,
       mode,
+      action: 'refuse',
       reason: `mode '${mode}' exists but this task does not qualify: ${violations.join('; ')}`,
       violations,
       unchecked,
       stale_days: stale,
     };
   }
+
+  // Graduated response, mirroring meg/policy.py. A `nudge` still delegates, but
+  // hands back the reason it is questionable — in an agent runtime that becomes
+  // context the model reads and self-corrects on, which costs nothing when the
+  // model was right and saves a bad call when it was not.
+  const notes: string[] = [];
+  let action = 'allow';
+  if (unchecked.length) {
+    action = 'nudge';
+    notes.push(
+      `delegated with UNVERIFIED constraints: ${unchecked.join('; ')}. ` +
+        `Pass the metadata, or set requireFullMetadata:true to refuse instead.`,
+    );
+  }
+  if (stale != null && stale > staleAfterDays) {
+    if (action === 'allow') action = 'nudge';
+    notes.push(
+      `mode '${mode}' was last verified ${stale}d ago (> ${staleAfterDays}d). ` +
+        `An old verdict is a hypothesis, not a fact — re-run its regression spec.`,
+    );
+  }
   return {
     allowed: true,
     mode,
+    action,
+    notes,
     model: spec.model as string,
     provider: (spec.provider as Json) ?? null,
     reason: `earned permission: ${spec.use_when ?? ''}`.trim(),
@@ -233,22 +265,13 @@ export function register(api: { on: Function }, options: MegPluginOptions = {}) 
 
   const emit = (d: Decision) => {
     if (!audit) return;
-    const verdict = d.allowed ? `ALLOW -> ${d.model}` : 'REFUSE';
+    const verdict = d.allowed ? `${(d.action ?? 'allow').toUpperCase()} -> ${d.model}` : 'REFUSE';
     const line = `[model-eval-gate] ${verdict}  mode=${d.mode}  ${d.reason}`;
     if (log) log(line, d);
     else console.info(line);
-    if (d.allowed && d.unchecked?.length) {
-      console.warn(
-        `[model-eval-gate] mode=${d.mode} allowed with UNVERIFIED constraints: ` +
-          `${d.unchecked.join('; ')} — set requireFullMetadata:true to refuse instead.`,
-      );
-    }
-    if (d.allowed && d.stale_days != null && d.stale_days > 120) {
-      console.warn(
-        `[model-eval-gate] mode=${d.mode} was last verified ${d.stale_days}d ago. ` +
-          `An old verdict is a hypothesis, not a fact — re-run its regression spec.`,
-      );
-    }
+    // Nudge notes are the self-correction channel: surface them rather than
+    // burying them, because a warning nobody sees is the same as no warning.
+    for (const n of d.notes ?? []) console.warn(`[model-eval-gate] ${d.mode}: ${n}`);
   };
 
   api.on('before_model_resolve', (event: Json, ctx: Json) => {
@@ -262,6 +285,12 @@ export function register(api: { on: Function }, options: MegPluginOptions = {}) 
     const d = decide(decl.mode, (decl.meta ?? {}) as Json, routes, requireFullMetadata);
     emit(d);
     if (!d.allowed) return; // leave OpenClaw's resolved model untouched
+
+    if (d.action === 'monitor') {
+      // Recorded, not enforced. The rollout posture: watch what the policy WOULD
+      // have done on a live workload before letting it do it.
+      return;
+    }
 
     const out: Json = { modelOverride: d.model };
     // A provider pin exists so production runs on the endpoint the eval was

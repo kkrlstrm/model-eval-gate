@@ -107,6 +107,59 @@ See [docs/ADDING_A_MODE.md](docs/ADDING_A_MODE.md) for the step-by-step, and [do
   receiving one request in thirty days while its traffic quietly migrated to an
   unevaluated sibling is exactly the state this policy exists to make visible.
 
+## Graduated response, and posture
+
+A gate with only "yes" and "no" forces two bad choices: block work you are not yet sure
+about, or wave it through silently. Four actions instead:
+
+| action | delegates? | meaning |
+|---|---|---|
+| `allow` | yes | earned, and every declared constraint was evidenced |
+| `monitor` | yes | recorded, nothing enforced — how a new mode is rolled onto live work |
+| `nudge` | yes | proceeds, and hands back *why it is questionable* (unverified constraint, stale verdict) |
+| `refuse` | no | the mode exists, this task does not qualify |
+| `block` | no | unknown mode, retired mode, or unreadable policy |
+
+**`nudge` is the one that earns adoption.** In an agent runtime the note becomes context the
+model reads and self-corrects on: free when the model was right, and it saves a bad call
+when it was not.
+
+**Posture decides what an *unproven* condition means** — the only place reasonable people
+differ. `attended` (a human reads the output) nudges on an unchecked constraint or a stale
+verdict. `unattended` (cron, fleet worker, an agent loop at 3am) refuses, because there
+"nobody objected" is not evidence. Choose it once at the integration boundary rather than
+per call site.
+
+## Every decision is recorded, and the record is tamper-evident
+
+Every claim this policy makes is retrospective: *that workload was refused*, *this mode was
+allowed under these constraints*, *nothing bypassed the gate last month*. Console logging
+supports none of them.
+
+`meg/audit.py` appends one hash-chained line per decision, so editing or removing an earlier
+line breaks the chain from that point and `verify()` reports where. It does not stop someone
+truncating the file — that is what an external witness is for — but it makes *silent edits*
+detectable, and the realistic threat is a decision quietly reclassified after something went
+wrong, not one deleted outright.
+
+Writing is best-effort by design: an audit failure must never block a call. A gate that goes
+down because its logger's disk filled has failed closed on availability grounds, which is
+worse than a gap in the log — and the gap is itself visible, because the chain records a
+sequence.
+
+## The repository's own claims are gated too
+
+A project that gates delegation on evidence should not gate its own promises on good
+intentions. Both run in CI:
+
+- `gates/verify_no_real_data.py` — fails when a tracked file holds a credential or real
+  telemetry (managed-service hostnames, absolute home paths). Documentation placeholders are
+  allowlisted **by exact string, never by loosening a pattern** — a relaxed DSN regex would
+  let a real credential through, which is the wrong side of that trade.
+- `gates/verify_doc_refs.py` — fails when a doc points at a file, a mode, or a CLI
+  subcommand that does not exist. These docs are instructions an agent will act on; a dead
+  path makes it improvise the thing the helper existed to prevent.
+
 ## Enforcement has a boundary — know where it is
 
 This is a fail-closed gate **for calls that pass through it**. It is not a sandbox or a

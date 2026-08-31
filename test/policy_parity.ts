@@ -21,7 +21,7 @@ const cases: Array<{
   mode: string;
   meta: Json;
   strict?: boolean;
-  expect: { allowed: boolean; reason_contains?: string };
+  expect: { allowed: boolean; reason_contains?: string; action?: string };
 }> = JSON.parse(readFileSync('test/policy_cases.json', 'utf8'));
 
 let failed = 0;
@@ -31,12 +31,15 @@ for (const c of cases) {
   const okReason =
     !c.expect.reason_contains ||
     d.reason.toLowerCase().includes(c.expect.reason_contains.toLowerCase());
-  if (okAllowed && okReason) {
+  // The graduated action is checked too: `allowed` alone cannot tell a plain
+  // allow from a nudge, and the nudge is the whole point of the middle states.
+  const okAction = !c.expect.action || d.action === c.expect.action;
+  if (okAllowed && okReason && okAction) {
     console.log(`  ✓ ${c.name}`);
   } else {
     failed++;
     console.log(
-      `  ✗ ${c.name}: allowed=${d.allowed} (want ${c.expect.allowed})  reason="${d.reason}"`,
+      `  ✗ ${c.name}: allowed=${d.allowed} (want ${c.expect.allowed}) action=${d.action} (want ${c.expect.action ?? 'any'})  reason="${d.reason}"`,
     );
   }
 }

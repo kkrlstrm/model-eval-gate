@@ -10,7 +10,8 @@
     },
     "expect": {
       "allowed": true,
-      "reason_contains": "earned permission"
+      "reason_contains": "earned permission",
+      "action": "allow"
     }
   },
   {
@@ -23,7 +24,8 @@
     },
     "expect": {
       "allowed": false,
-      "reason_contains": "min_rows"
+      "reason_contains": "min_rows",
+      "action": "refuse"
     }
   },
   {
@@ -36,7 +38,8 @@
     },
     "expect": {
       "allowed": false,
-      "reason_contains": "single-row"
+      "reason_contains": "single-row",
+      "action": "refuse"
     }
   },
   {
@@ -45,7 +48,8 @@
     "meta": {},
     "expect": {
       "allowed": false,
-      "reason_contains": "not on the allowlist"
+      "reason_contains": "not on the allowlist",
+      "action": "block"
     }
   },
   {
@@ -54,7 +58,8 @@
     "meta": {},
     "expect": {
       "allowed": false,
-      "reason_contains": "retired"
+      "reason_contains": "retired",
+      "action": "block"
     }
   },
   {
@@ -63,7 +68,8 @@
     "meta": {},
     "strict": false,
     "expect": {
-      "allowed": true
+      "allowed": true,
+      "action": "nudge"
     }
   },
   {
@@ -73,7 +79,8 @@
     "strict": true,
     "expect": {
       "allowed": false,
-      "reason_contains": "unverified constraint"
+      "reason_contains": "unverified constraint",
+      "action": "refuse"
     }
   },
   {
@@ -87,7 +94,8 @@
     },
     "strict": true,
     "expect": {
-      "allowed": true
+      "allowed": true,
+      "action": "allow"
     }
   },
   {
@@ -101,7 +109,8 @@
     },
     "expect": {
       "allowed": false,
-      "reason_contains": "stakes"
+      "reason_contains": "stakes",
+      "action": "refuse"
     }
   },
   {
@@ -113,7 +122,8 @@
     "strict": true,
     "expect": {
       "allowed": true,
-      "reason_contains": "earned permission"
+      "reason_contains": "earned permission",
+      "action": "allow"
     }
   }
 ]

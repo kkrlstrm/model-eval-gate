@@ -159,6 +159,11 @@ A gate that can't tell these apart reports savings that don't exist.
 | `validate()` before any spend | a grader that condemns every arm because it's measuring **itself** |
 | cross-family judge panels | a judge inflating its own family's arm (measured at **+0.32** on a 1–5 scale) |
 | unknown stakes ⇒ treated as high | a cheap model quietly making per-row decisions nobody audited |
+| **graduated actions** — `monitor` / `nudge` / `refuse` / `block` | a binary gate having only "yes" and "no": `monitor` rolls a mode out by recording what it *would* have done; `nudge` proceeds but hands the model the reason it is questionable |
+| **posture** — attended vs unattended | "nobody objected" being read as evidence at 3am. Attended nudges on an unproven constraint; unattended refuses |
+| **hash-chained audit log** | a decision quietly reclassified after something went wrong — `meg.audit.verify()` locates the first edited line |
+| `gates/verify_no_real_data.py` | this repo breaking its own "ships no real data" promise, which until it existed was enforced by nobody |
+| `gates/verify_doc_refs.py` | a doc telling an agent to run a file that no longer exists, so it improvises the thing the helper prevented |
 | `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
 
 ### Storage
@@ -245,10 +250,11 @@ not a universal control plane. Four limits, all reported by the tool itself
 1. **Enforcement covers calls that pass through it.** A tool shelling out to a provider, or
    a sub-process with its own API key, bypasses it. That is why coverage reconciliation
    exists rather than being optional.
-2. **Missing caller metadata warns by default; it does not refuse.** A constraint nobody
-   supplied evidence for is *unchecked*, not satisfied. Set `require_full_metadata=True`
-   (Python) / `requireFullMetadata: true` (OpenClaw) to make it a refusal — recommended for
-   unattended agents, where nobody reads a warning.
+2. **Missing caller metadata nudges by default; it does not refuse.** A constraint nobody
+   supplied evidence for is *unchecked*, not satisfied — the call proceeds and the caller is
+   told why that is questionable. Pass `posture="unattended"` (or
+   `require_full_metadata=True` / `requireFullMetadata: true`) to make it a refusal, which
+   is the right setting whenever nobody is reading the warning.
 3. **4 of 6 bundled modes declare no machine-checkable constraints.** For those the gate
    checks the mode name and nothing else; eligibility lives in prose that no runtime reads.
 4. **4 of 6 bundled modes have no regression spec.** A mode without one is a verdict nobody

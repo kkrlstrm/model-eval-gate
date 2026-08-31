@@ -27,5 +27,13 @@ jobs:
         run: npm run check
       - name: TS + Python parity tests
         run: npm test
+      - name: Pipeline tests (observe / cluster / propose / grader validation)
+        run: python3 test/test_pipeline.py
+      - name: Fictional end-to-end example (no key, no network)
+        run: python3 examples/fictional_workload.py
+      - name: Package installs and the console script runs
+        run: |
+          python3 -m pip install -e .
+          python3 -m meg.cli gate check
       - name: Formatting
         run: npm run format:check

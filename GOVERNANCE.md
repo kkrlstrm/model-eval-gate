@@ -29,15 +29,65 @@ These rarely have a safe cheap-model mode:
 
 Cheap models earn a mode when the volume is high, the quality bar genuinely tolerates some noise (aggregate analytics, binary gating, a supplemental lens), and the orchestrator does the gating and synthesis around the cheap call.
 
+## Deciding *what* to eval (before you eval anything)
+
+The steps below assume you already know which task shape is a candidate. Usually you
+don't, and the model catalog cannot tell you — it does not know what you do. Work
+therefore enters this process from **observed telemetry**, not from a price list:
+
+1. **Observe.** `meg observe ingest` reads the Claude Code and Codex sessions you have
+   already run; `meg observe sync` pulls the provider's spend rollup. Only the *shape*
+   of a call is stored — never prompt or argument content.
+2. **Cluster.** `meg workload list` groups calls into workload classes and marks each
+   eligible or not. **Eligibility is a property of the task, not the price.** A class is
+   blocked when volume is too low to eval meaningfully (< 30 observations), when the work
+   is subscription-billed (§ *The counterfactual*), or when stakes are high **or
+   unconfirmed** — unknown stakes are treated as high, never as low.
+3. **Propose.** `meg workload propose <class>` applies capability requirements as **hard
+   filters first** (structured outputs, modality, context), then ranks survivors by
+   projected spend **at that class's measured token profile**. List price is not the
+   ranking key; a model with a higher list price can be cheaper on your actual token mix.
+   Free tiers and auto-router pseudo-models are excluded by default — a free endpoint
+   rate-limits hard enough that an eval scored on it does not predict production, and an
+   auto-router picks a different model at call time, so the thing you measured is not the
+   thing that runs.
+4. **Scaffold.** `meg eval scaffold <class>` emits a spec for a human to review. It is
+   never auto-run: the stakes question cannot be derived from telemetry, and a pipeline
+   that guesses it would be guessing about whether a person acts on a single row.
+
+A slate is not a verdict. It is the list of things worth measuring.
+
+## The counterfactual: what a win actually buys
+
+Work that already runs on a subscription has a marginal cost of roughly **$0**. Moving it
+to a cheaper model therefore saves **no money at all** — it buys rate-limit headroom and
+throughput, which are real benefits that must not be laundered into a dollar figure.
+
+So `billing` is recorded per call, and every counterfactual states which case it is. A
+saving is only claimed for work that would otherwise be **API-billed**. Reporting a
+subscription "saving" is a governance failure, not a rounding difference: it manufactures
+a justification for moving work that had no cost problem.
+
 ## Adding a mode
 
 A new mode requires, in order:
 
 1. **An eval against your real data** (not synthetic), using the harness pattern in `eval/`.
-2. **Quality scored against a frontier anchor** (your orchestrator model) on that data.
-3. **A clear pass of a strict bar** — measurable parity for the use case, not "good enough with caveats." If the recommendation needs an "if you scaffold the prompt with…" clause, it does not qualify.
-4. **A `use_when` / `do_not_use_when` pair** narrow enough that misuse is hard, each tied to something the eval actually showed. Where the boundary is machine-checkable, also add a **`constraints`** block (`min_rows`, `forbid_single_row_decision`, `requires_human_review`, `allowed_input_types`, `max_stakes`) so the gate enforces task eligibility, not just the mode name.
-5. **An entry in `routes.json`** (+ an evidence entry in your observations log) with a `verified_date`. `routes.json` is validated on load — a malformed policy file (missing field, non-ISO date, generic mode name, a name in both `modes` and `retired`) fails closed and refuses everything. Run `npm run check` to validate offline.
+   The prompt must be **imported verbatim from production**, not paraphrased — a
+   paraphrase measures a task you do not run.
+2. **A validated grader, before any candidate spend.** Run `meg.scaffold.validate()` with
+   known-good and known-bad examples. A grader that does not separate them is rejected:
+   it will produce confident, uniformly-bad numbers that read as a finding about the
+   models when they are a finding about the grader. Prefer a **code** grader wherever the
+   output has a checkable contract; use a model panel only for generative output.
+3. **Cross-family judges, if a panel is used.** At least two judges from *different* model
+   families. A same-family judge inflates its own arm, and the self-preference delta and
+   inter-judge agreement must be reported by default, not on request. A single-judge panel
+   is not a verdict.
+4. **Quality scored against a frontier anchor** (your orchestrator model) on that data.
+5. **A clear pass of a strict bar** — measurable parity for the use case, not "good enough with caveats." If the recommendation needs an "if you scaffold the prompt with…" clause, it does not qualify.
+6. **A `use_when` / `do_not_use_when` pair** narrow enough that misuse is hard, each tied to something the eval actually showed. Where the boundary is machine-checkable, also add a **`constraints`** block (`min_rows`, `forbid_single_row_decision`, `requires_human_review`, `allowed_input_types`, `max_stakes`) so the gate enforces task eligibility, not just the mode name.
+7. **An entry in `routes.json`** (+ an evidence entry in your observations log) with a `verified_date`. `routes.json` is validated on load — a malformed policy file (missing field, non-ISO date, generic mode name, a name in both `modes` and `retired`) fails closed and refuses everything. Run `npm run check` to validate offline.
 
 A mode that later fails a re-eval is **retired with a dated reason**, not silently deleted — the refusal message teaches the next operator why.
 
@@ -48,3 +98,35 @@ See [docs/ADDING_A_MODE.md](docs/ADDING_A_MODE.md) for the step-by-step, and [do
 - **Verified-date staleness.** Each mode carries `verified_date`; the CLI warns when a verdict is older than `staleness_warn_days`. A months-old "this model is fine" is a hypothesis, not a fact.
 - **Regression.** Every passing eval graduates into a frozen regression spec (`eval/regression/*.json`) that re-runs against the model the allowlist currently routes the mode to, over k trials, and fails on drift. This catches a model degrading, an OpenRouter provider change, or a routes edit that swapped the model out from under a mode.
 - **Provider pinning.** Because the same model id can be served by different providers/quantizations, pin `provider` on a mode once you know which endpoint your eval was scored on, so production can't silently drift onto a worse one.
+- **Verify the artifact, not only the endpoint.** Re-running an eval proves the model still
+  behaves; it does not prove the data already in your database is sound. Stored output has
+  been measured scoring *worse* than a fresh run of the same model on the same prompt. A
+  regression that only pings the endpoint will not see that.
+- **Dead modes are a finding.** A mode nobody calls, or a model called by nobody's mode, is
+  drift. `meg observe coverage` and per-mode call counts surface both — a flagship mode
+  receiving one request in thirty days while its traffic quietly migrated to an
+  unevaluated sibling is exactly the state this policy exists to make visible.
+
+## Enforcement has a boundary — know where it is
+
+This is a fail-closed gate **for calls that pass through it**. It is not a sandbox or a
+network policy boundary: code that calls a provider directly bypasses it entirely, and that
+is not hypothetical — it is the most common way an allowlist rots. Two defences:
+
+- **Make the gate the only egress path.** Run calling code without provider keys in its
+  environment and expose only the recorder/router.
+- **Measure the bypass.** `meg observe coverage` compares recorded calls against the
+  provider's own request count. A gap means something reached the provider around the gate.
+  Treat a persistent gap as a policy violation, not a telemetry nuisance.
+
+Related: never hardcode a model id at a call site. Resolve it from `routes.json` at call
+time. Documented model choices drift from executed ones silently — a single call site has
+been observed naming three *different* models across its docstring, an inline comment, and
+its actual constant.
+
+## Presets are hypotheses
+
+Modes shipped in this repository were verified on someone else's data. Inheriting them is
+not the same as earning them: run the mode's regression spec on your own data before
+relying on it, and treat any mode without a spec as "measured once, by someone else,
+elsewhere." Shipping presets as verdicts would violate rule 1 of *Adding a mode*.

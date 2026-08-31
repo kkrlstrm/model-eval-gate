@@ -6,3 +6,13 @@ node_modules/
 eval/regression-results.json
 __pycache__/
 *.pyc
+
+# local telemetry — never commit real workload data
+*.db
+.model-eval-gate/
+meg-*.db
+
+# python build artifacts
+*.egg-info/
+build/
+dist/

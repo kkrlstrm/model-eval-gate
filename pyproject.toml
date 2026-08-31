@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-eval-gate"
+version = "2.0.0.dev0"
+description = "Evidence-first delegation control for LLM work: observe what you do, propose candidates, eval on your data, gate what may move."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Kai Karlstrom" }]
+keywords = ["llm", "routing", "evals", "openrouter", "telemetry", "claude-code", "codex"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+# The observe/cluster/propose/scaffold stages are stdlib-only ON PURPOSE: reading
+# your own telemetry and validating a grader must never require a dependency tree,
+# because the first thing a new user does is run them.
+dependencies = []
+
+[project.optional-dependencies]
+http = ["requests>=2.31"]      # only the Python port's live-call path needs this
+postgres = ["psycopg2-binary>=2.9"]   # only if you point MEG_DB at postgresql://
+dev = ["pytest>=7"]
+
+[project.scripts]
+meg = "meg.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kkrlstrm/model-eval-gate"
+
+[tool.setuptools]
+packages = ["meg", "meg.observe", "meg.workload", "meg.scaffold"]

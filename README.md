@@ -3,9 +3,11 @@
 <!-- portfolio-status -->
 **Status:** Reference implementation — extracted from a private production GTM system; tenant data, provider adapters, and company-specific policy stay private. · **Layer:** Quality & policy enforcement · **[Portfolio map ›](https://github.com/kkrlstrm)**
 
-**A circuit breaker for cheap-model delegation.**
+**Cost-first routers tell you what's cheap. This tells you what's *safe to move* — and what isn't.**
 
 Agents shouldn't route work to a cheaper model just because it's cheap, fast, or "probably good enough." A non-frontier model gets used only when it has *earned* a narrow permission: a named task mode, backed by an eval on your real data, with explicit `use_when` / `do_not_use_when` boundaries. Everything else stays with the frontier / orchestrator model.
+
+It starts from **the work you already do** — read out of your Claude Code and Codex sessions — not from a price list. See [Where the modes come from](#where-the-modes-come-from-v2).
 
 **model-eval-gate turns eval results into enforceable delegation policy.** If a task matches an eval-verified mode, it can run on the approved non-frontier model. If it doesn't, the call is refused. Retired modes fail closed with the date and the reason, so old shortcuts don't silently come back.
 
@@ -51,6 +53,129 @@ model-eval-gate doesn't replace your eval platform (Promptfoo, Braintrust, Harbo
 
 The included harness is policy *maintenance*, not a competing eval product.
 
+## Where the modes come from (v2)
+
+v1 assumed you already knew which task shapes to eval. Most people don't — and the model
+catalog can't tell you, because the catalog doesn't know what you do. So v2 adds the half
+that comes *before* the gate:
+
+```
+observe ──▶ cluster ──▶ propose ──▶ scaffold ──▶ validate ──▶ run ──▶ gate ──▶ maintain
+   │           │           │           │            │          │        │         │
+harness     workload    candidate     eval       grader     bake-off  routes  regression
+adapters    classes     slate from    spec +     sanity     vs        .json   + staleness
++ call                  the live      samples    check      control           + dead-mode
+recorder                catalog                                                feedback
+```
+
+Every other tool in this space starts at the catalog and asks *"what's cheap?"*. Starting
+from observed work makes the first question *"what do I actually do, and which parts are
+even eligible to move?"* — and eligibility is a property of the task, not the price list.
+
+```bash
+meg observe ingest        # read Claude Code + Codex sessions you have ALREADY run
+meg observe sync          # pull the provider's daily spend rollup
+meg observe coverage      # is anything reaching the provider around the gate?
+meg workload list         # what work exists, and what may move
+meg workload propose supplier-page-digest    # candidates ranked on YOUR token profile
+meg eval scaffold supplier-page-digest       # a reviewable eval spec
+```
+
+See it end-to-end on invented data — no setup, no key:
+
+```bash
+python3 examples/fictional_workload.py
+```
+
+### Telemetry: both harnesses, one schema
+
+Two coding agents, two mechanisms, because they expose telemetry differently and pretending
+otherwise loses data:
+
+| harness | mechanism | why |
+|---|---|---|
+| **Claude Code** | lifecycle HTTP hooks + local transcript JSONL | hooks fire for every tool; the transcript path also works **retroactively**, so you get a workload picture from past sessions without having configured anything first |
+| **Codex** | tail the append-only rollout JSONL under `~/.codex/sessions/**` | Codex hooks fire only for shell commands, so a hook-based reader silently misses edits, MCP calls and sub-agents |
+
+Both land in one `work_events` table, so everything downstream is harness-agnostic. This
+mirrors the split proven by [cc-logger](https://github.com/kkrlstrm/cc-logger) and
+[codex-logger](https://github.com/kkrlstrm/codex-logger).
+
+**Only the *shape* of a call is stored, never its content.** Commands are reduced to an
+argv0 and a script name, prompts to a length and a fingerprint. These databases get shared
+when someone asks for routing help; prompts and arguments would carry customer data and
+credentials into that conversation.
+
+### The counterfactual nobody else computes
+
+If a call runs inside a Claude Code or Codex session on a subscription, the frontier
+model's marginal cost is **$0**. Routing it elsewhere saves nothing — it buys rate-limit
+headroom and throughput, which are real but are not dollars. The saving is real only for
+work that would otherwise be **API-billed**.
+
+So `billing` is recorded per call, and the counterfactual says so out loud:
+
+```
+supplier-page-digest   frontier $420.18 → candidate $11.81   ratio 35.6x
+                       DOLLARS SAVED $408.37   ← real saving: this work is API-billed
+
+claim-summary-draft    frontier  $12.55 → candidate  $0.29   ratio 43.5x
+                       DOLLARS SAVED   $0.00   ← subscription-billed, marginal cost ~$0
+```
+
+A gate that can't tell these apart reports savings that don't exist.
+
+### Guardrails, each from a bug that shipped silently
+
+| guardrail | what it prevents |
+|---|---|
+| `meg observe coverage` | a script calling the provider **around** the gate, on a model nobody evaluated |
+| hard filters before price ranking | a cheaper model that can't meet the output contract being ranked at all |
+| negative/absent price → infinite | router pseudo-models publishing `-1` and ranking first at *minus* $108M |
+| free tiers excluded by default | a `$0` rank winning every comparison, on endpoints that rate-limit so hard the eval doesn't predict production |
+| `validate()` before any spend | a grader that condemns every arm because it's measuring **itself** |
+| cross-family judge panels | a judge inflating its own family's arm (measured at **+0.32** on a 1–5 scale) |
+| unknown stakes ⇒ treated as high | a cheap model quietly making per-row decisions nobody audited |
+| `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
+
+### Storage
+
+SQLite by default (`~/.model-eval-gate/meg.db`, zero setup). Point `MEG_DB` or `--db` at a
+`postgresql://` DSN to co-locate with an existing telemetry database — same schema, same
+code path. The Postgres backend is covered by tests you can run yourself:
+
+```bash
+createdb meg_pg_test
+MEG_TEST_PG="postgresql://$(whoami)@localhost:5432/meg_pg_test" python3 test/test_pipeline.py
+dropdb meg_pg_test
+```
+
+The observe / cluster / propose / scaffold stages are **stdlib-only**; `psycopg2` is an
+optional extra (`pip install 'model-eval-gate[postgres]'`) and `requests` is needed only by
+the Python port's live-call path.
+
+### Presets are hypotheses, not verdicts
+
+The bundled modes were verified on someone else's data. Shipping them as verdicts would
+violate the project's own founding rule, so a preset is **a starting hypothesis you confirm
+on your own data**, not a permission you inherit. Your first regression run is your first
+eval.
+
+**Current state, stated plainly:** 2 of the 6 bundled modes ship a frozen regression spec.
+
+| mode | regression spec |
+|---|---|
+| `filter-auto-reply` | ✅ `eval/regression/auto-reply.json` |
+| `extract-accurate` | ✅ `eval/regression/extract-fields.json` |
+| `extract-bulk` | ❌ — shares the extraction schema; needs its own throughput-shaped gold set |
+| `digest-longcontext` | ❌ — needs an LLM-judge grader |
+| `lint-code` | ❌ — needs an LLM-judge grader |
+| `extract-multimodal` | ❌ — needs an image corpus |
+
+A mode without a spec is a **hypothesis with no maintenance behind it**. Treat those four
+as "someone else measured this once"; confirm before relying on them. Contributions of
+specs (with fictionalised corpora) are the most useful PR you can send.
+
 ## Scope: a gate, not a sandbox
 
 Be clear-eyed about the boundary. **model-eval-gate is a fail-closed gate for calls that go *through* it** — the CLI or the Python port. It is **not** a sandbox or a network-level policy boundary: an agent, service, or script that calls OpenRouter (or a provider) directly bypasses it entirely.
@@ -86,11 +211,18 @@ To make it a real control plane rather than a governed helper, **make it the onl
 
 ```bash
 git clone https://github.com/kkrlstrm/model-eval-gate && cd model-eval-gate
-npm install
+pip install -e .          # the `meg` pipeline (stdlib-only)
+npm install               # the TS gate/CLI + regression harness
 cp .env.example .env      # add your OPENROUTER_API_KEY
 ```
 
-Needs Node 18+ and an [OpenRouter](https://openrouter.ai) key. model-eval-gate is OpenRouter-native (one key, many models).
+The `meg` pipeline needs Python 3.10+ and no third-party packages. The TS gate needs Node
+18+. An [OpenRouter](https://openrouter.ai) key is required for live calls and the model
+catalog; `meg observe ingest`, `meg workload list` and grader validation all work offline.
+
+`meg observe sync` additionally needs `OPENROUTER_MANAGEMENT_KEY` — the daily-spend
+endpoint rejects an inference key with a 403, and it only retains **30 days**, so schedule
+it daily or you lose history permanently.
 
 ## Use
 
@@ -209,6 +341,16 @@ CI (`.github/workflows/ci.yml`) runs the offline gate on every push/PR. The live
 
 Apache-2.0 © 2026 Kai Karlstrom
 
+## Data policy
+
+This repository ships **no real data**. Every fixture, sample workload, example
+observation and preset number is invented — fictional organisations, fictional people,
+fictional model ids. Your telemetry stays in your own store (`~/.model-eval-gate/meg.db`
+by default) and is never committed here.
+
+If you contribute an eval writeup, generalise it first: the *shape* of the finding is the
+useful part, and it travels without your customers' names attached.
+
 ---
 
 <!-- portfolio-footer -->
@@ -220,3 +362,4 @@ Part of a portfolio of **governed, AI-native GTM systems** — reference impleme
 
 Works with:
 - [cc-logger](https://github.com/kkrlstrm/cc-logger) — observes real delegation usage
+- [codex-logger](https://github.com/kkrlstrm/codex-logger) — the Codex half of the same signal

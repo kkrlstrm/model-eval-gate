@@ -33,6 +33,7 @@ from meg.observe.recorder import _merge_preserving
 from meg.workload.cluster import WorkloadClass, from_calls, from_harness, counterfactual
 from meg.workload.propose import propose, filter_capable, _price, _is_free_tier
 from meg.scaffold import SchemaGrader, RegexGrader, validate, score_panel
+from meg.policy import decide, load_routes
 
 FAILS: list[str] = []
 
@@ -246,6 +247,33 @@ def test_calls_cluster_by_tag() -> None:
     truthy("untagged bucketed separately", "(untagged)" in cs)
 
 
+def test_policy_parity_with_ts() -> None:
+    """Python `decide()` must agree with the TS `decide()` in the OpenClaw plugin.
+
+    Both read test/policy_cases.json, so a case cannot be added to one side and
+    forgotten on the other. An agent governed by the OpenClaw plugin and a script
+    governed by the Python library must never reach opposite conclusions about
+    the same task -- that is how one policy quietly becomes two."""
+    root = Path(__file__).resolve().parent.parent
+    cases = json.loads((root / "test" / "policy_cases.json").read_text())
+    routes = load_routes(root / "routes.json")
+    for c in cases:
+        d = decide(c["mode"], c["meta"], routes=routes,
+                   require_full_metadata=c.get("strict", False))
+        check(f"policy: {c['name'][:52]}", d.allowed, c["expect"]["allowed"])
+        want = c["expect"].get("reason_contains")
+        if want:
+            truthy(f"  reason mentions {want!r}", want.lower() in d.reason.lower())
+
+
+def test_policy_fails_closed() -> None:
+    """No readable policy => nothing is earned. Never a permissive default."""
+    d = decide("extract-bulk", {"rows": 9999},
+               routes={"modes": {}, "retired": {}, "_error": "unreadable"})
+    check("unreadable policy refuses", d.allowed, False)
+    truthy("says why", "policy unavailable" in d.reason)
+
+
 def test_postgres_backend() -> None:
     """The Postgres path, exercised for real — or skipped loudly.
 
@@ -312,6 +340,8 @@ def main() -> int:
     print("enrichment preservation");     test_enrichment_preserves_local_fields()
     print("coverage / bypass");           test_coverage_detects_bypass()
     print("call clustering");             test_calls_cluster_by_tag()
+    print("policy parity (shared cases)"); test_policy_parity_with_ts()
+    print("policy fails closed");         test_policy_fails_closed()
     print("postgres backend");            test_postgres_backend()
     print(f"\n{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failing check(s)")
     return 1 if FAILS else 0

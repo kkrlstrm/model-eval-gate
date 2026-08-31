@@ -178,17 +178,60 @@ def cmd_gate(a) -> int:
         return 1
     data = json.loads(routes.read_text())
     modes, retired = data.get("modes", {}), data.get("retired", {})
+    specs = _regression_modes()
     print(f"{len(modes)} allowed mode(s), {len(retired)} retired\n")
+    print(f"  {'mode':22s} {'model':34s} {'constraints':12s} {'spec':5s}")
+    unconstrained, unspecced = [], []
     for name, m in modes.items():
-        print(f"  {name:22s} {m.get('model','?')}")
+        c = m.get("constraints") or {}
+        has_spec = name in specs
+        if not c:
+            unconstrained.append(name)
+        if not has_spec:
+            unspecced.append(name)
+        print(f"  {name:22s} {str(m.get('model','?'))[:33]:34s} "
+              f"{(str(len(c)) + ' checked') if c else 'name only':12s} "
+              f"{'yes' if has_spec else 'NO':5s}")
         if not m.get("do_not_use_when"):
             print("      ^ MISSING do_not_use_when — the negative constraint is what "
                   "prevents misuse; a mode without one is not gated.")
+
+    # Two coverage gaps that a mode list alone hides. Both are stated as limits
+    # of enforcement, not as failures, because that is what they are: the gate
+    # can only check what a mode declares, and can only stay honest about what a
+    # regression spec re-measures.
+    if unconstrained:
+        print(f"\n  {len(unconstrained)}/{len(modes)} mode(s) declare NO machine-checkable "
+              f"constraints: {', '.join(unconstrained)}")
+        print("    For these the gate checks the MODE NAME and nothing else — task "
+              "eligibility\n    is enforced by prose in use_when/do_not_use_when, which "
+              "no runtime reads.")
+    if unspecced:
+        print(f"\n  {len(unspecced)}/{len(modes)} mode(s) have NO regression spec: "
+              f"{', '.join(unspecced)}")
+        print("    A mode without a spec is a verdict nobody re-measures. Treat it as "
+              "'measured\n    once, by someone else, elsewhere'.")
     if retired:
         print("\nretired:")
         for name, r in retired.items():
             print(f"  {name:22s} {r.get('retired_date','?')}  {r.get('reason','')[:60]}")
     return 0
+
+
+def _regression_modes() -> set[str]:
+    """Modes that have a frozen regression spec behind them."""
+    out: set[str] = set()
+    d = ROOT / "eval" / "regression"
+    if not d.is_dir():
+        return out
+    for f in d.glob("*.json"):
+        try:
+            spec = json.loads(f.read_text())
+        except Exception:  # noqa: BLE001
+            continue
+        m = spec.get("mode") or spec.get("modes")
+        out |= set(m if isinstance(m, list) else [m] if m else [])
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

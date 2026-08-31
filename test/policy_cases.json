@@ -1,0 +1,119 @@
+[
+  {
+    "name": "earned mode with satisfied constraints is allowed",
+    "mode": "extract-bulk",
+    "meta": {
+      "rows": 5000,
+      "single_row_decision": false,
+      "stakes": "low",
+      "input_type": "text"
+    },
+    "expect": {
+      "allowed": true,
+      "reason_contains": "earned permission"
+    }
+  },
+  {
+    "name": "earned mode, violated min_rows, refused",
+    "mode": "extract-bulk",
+    "meta": {
+      "rows": 3,
+      "single_row_decision": false,
+      "stakes": "low"
+    },
+    "expect": {
+      "allowed": false,
+      "reason_contains": "min_rows"
+    }
+  },
+  {
+    "name": "earned mode, single-row decision, refused",
+    "mode": "extract-bulk",
+    "meta": {
+      "rows": 9000,
+      "single_row_decision": true,
+      "stakes": "low"
+    },
+    "expect": {
+      "allowed": false,
+      "reason_contains": "single-row"
+    }
+  },
+  {
+    "name": "off-allowlist mode refused, and names the earned modes",
+    "mode": "translate",
+    "meta": {},
+    "expect": {
+      "allowed": false,
+      "reason_contains": "not on the allowlist"
+    }
+  },
+  {
+    "name": "retired mode refused with its dated reason",
+    "mode": "generic-cheap",
+    "meta": {},
+    "expect": {
+      "allowed": false,
+      "reason_contains": "retired"
+    }
+  },
+  {
+    "name": "lenient mode: unchecked constraints warn but do not refuse",
+    "mode": "extract-bulk",
+    "meta": {},
+    "strict": false,
+    "expect": {
+      "allowed": true
+    }
+  },
+  {
+    "name": "strict mode: an unevidenced constraint is a refusal",
+    "mode": "extract-bulk",
+    "meta": {},
+    "strict": true,
+    "expect": {
+      "allowed": false,
+      "reason_contains": "unverified constraint"
+    }
+  },
+  {
+    "name": "strict mode: full metadata still passes",
+    "mode": "extract-bulk",
+    "meta": {
+      "rows": 5000,
+      "single_row_decision": false,
+      "stakes": "low",
+      "input_type": "text"
+    },
+    "strict": true,
+    "expect": {
+      "allowed": true
+    }
+  },
+  {
+    "name": "stakes above the mode ceiling refused (extract-bulk declares max_stakes=low)",
+    "mode": "extract-bulk",
+    "meta": {
+      "stakes": "high",
+      "single_row_decision": false,
+      "rows": 1000,
+      "input_type": "text"
+    },
+    "expect": {
+      "allowed": false,
+      "reason_contains": "stakes"
+    }
+  },
+  {
+    "name": "a mode with NO constraints checks only the mode name \u2014 nothing else can be enforced",
+    "mode": "filter-auto-reply",
+    "meta": {
+      "stakes": "high"
+    },
+    "strict": true,
+    "expect": {
+      "allowed": true,
+      "reason_contains": "earned permission"
+    }
+  }
+]

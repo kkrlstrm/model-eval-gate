@@ -1,27 +1,48 @@
-# model-eval-gate
+# model-eval-gate — governed delegation for AI agents
 
 <!-- portfolio-status -->
 **Status:** Reference implementation — extracted from a private production GTM system; tenant data, provider adapters, and company-specific policy stay private. · **Layer:** Quality & policy enforcement · **[Portfolio map ›](https://github.com/kkrlstrm)**
 
-**Cost-first routers tell you what's cheap. This tells you what's *safe to move* — and what isn't.**
+**Know which agent workloads can safely leave the frontier model — and prove it.**
 
-Agents shouldn't route work to a cheaper model just because it's cheap, fast, or "probably good enough." A non-frontier model gets used only when it has *earned* a narrow permission: a named task mode, backed by an eval on your real data, with explicit `use_when` / `do_not_use_when` boundaries. Everything else stays with the frontier / orchestrator model.
+model-eval-gate observes the work your agents already do, identifies which of it is worth
+moving, turns passing evals into narrow executable permissions, and flags drift or calls
+that bypassed policy.
 
-It starts from **the work you already do** — read out of your Claude Code and Codex sessions — not from a price list. See [Where the modes come from](#where-the-modes-come-from-v2).
-
-**model-eval-gate turns eval results into enforceable delegation policy.** If a task matches an eval-verified mode, it can run on the approved non-frontier model. If it doesn't, the call is refused. Retired modes fail closed with the date and the reason, so old shortcuts don't silently come back.
+**Cheaper is not a permission.**
 
 ```
-$ npx tsx src/cli.ts translate "..."
-✗ Mode "translate" is not on the allowlist.
-  model-eval-gate enforces a strict delegation policy (see GOVERNANCE.md).
-  Only eval-verified modes are allowed; everything else stays with the orchestrator.
-
-$ npx tsx src/cli.ts generic-cheap "..."
-✗ Mode "generic-cheap" is RETIRED.
-  Retired 2026-05-18. A mode named for a model instead of a use case. Too generic;
-  it invited misuse on single-row decisions. Replaced by the narrower extract-bulk.
+observe real work → find eligible workloads → evaluate candidates on real task shapes
+   → publish a narrow permission → enforce it → detect drift and bypass
 ```
+
+Three outcomes it produces, in its own words:
+
+```
+$ meg workload list
+   9,400  supplier-page-digest    billing=api           eligible=yes
+     310  claim-summary-draft     billing=subscription  eligible=NO
+           └─ subscription-billed: marginal cost is ~$0, so routing it would save $0
+
+$ meg eval scaffold supplier-page-digest      # → earned a low-stakes, aggregate-only permission
+$ meg observe coverage
+   3 provider requests did NOT come through the recorder — something bypassed the gate
+```
+
+## Where it sits
+
+| layer | decides |
+|---|---|
+| **Agent runtime** — OpenClaw, Hermes, your own loop | *what work to do* |
+| **Gateway** — OpenRouter, LiteLLM | *how the call executes* — provider, fallback, cost, throughput |
+| **model-eval-gate** | *whether that work may be delegated to a smaller model at all* |
+
+These compose. It is not a replacement for a gateway or an eval platform: those execute
+calls and measure quality. This governs the **decision to delegate**, and keeps that
+decision maintained after it is made. See [integrations/](integrations/) — the OpenClaw
+plugin is enforcing today.
+
+> Agents can plan freely. They cannot downgrade freely.
 
 ## The failure mode
 
@@ -68,9 +89,11 @@ adapters    classes     slate from    spec +     sanity     vs        .json   + 
 recorder                catalog                                                feedback
 ```
 
-Every other tool in this space starts at the catalog and asks *"what's cheap?"*. Starting
-from observed work makes the first question *"what do I actually do, and which parts are
-even eligible to move?"* — and eligibility is a property of the task, not the price list.
+Routing tools generally start from a model catalog and optimise the call: which provider,
+what fallback, what cost. That is a real and different job, and this complements it.
+Starting from **observed work** instead makes the first question *"what do I actually do,
+and which parts are even eligible to move?"* — and eligibility is a property of the task,
+not of the price list.
 
 ```bash
 meg observe ingest        # read Claude Code + Codex sessions you have ALREADY run
@@ -175,6 +198,61 @@ eval.
 A mode without a spec is a **hypothesis with no maintenance behind it**. Treat those four
 as "someone else measured this once"; confirm before relying on them. Contributions of
 specs (with fictionalised corpora) are the most useful PR you can send.
+
+## Plug it into your agent framework
+
+An adapter is a thin translation over one decision function
+([`meg/policy.py:decide()`](meg/policy.py)) — adapters hold no policy of their own, so a
+new runtime cannot ship a slightly different interpretation of the rules.
+
+**OpenClaw — enforcing today.** `before_model_resolve` runs before the session model is
+resolved and may return `{ providerOverride, modelOverride }`; returning nothing means no
+override — which maps onto this policy exactly, because a refusal *is* "return nothing."
+
+```ts
+import { register } from "model-eval-gate/integrations/openclaw";
+
+export default (api) =>
+  register(api, {
+    requireFullMetadata: true, // unattended: an unevidenced constraint refuses
+    workloadMap: {
+      "nightly-enrichment": { mode: "extract-bulk", meta: { rows: 5000, single_row_decision: false } },
+    },
+  });
+```
+
+It only ever moves a turn **down** to a model that earned a permission for that workload —
+never upgrades, never picks between frontier models, never substitutes on price.
+
+**Hermes — advisory only, and it says so.** Hermes' `pre_llm_call` hook currently has its
+result treated as user-message context, so a plugin cannot cleanly override the model;
+doing it today means monkey-patching the agent loop, which is brittle across releases
+([upstream issue](https://github.com/NousResearch/hermes-agent/issues/23739)). The adapter
+therefore **decides and records but does not enforce**, rather than monkey-patching to look
+like it works. It becomes enforcing when the upstream hook can return an override, with no
+policy change.
+
+**Anything else** — implement four capabilities (pre-call hook, a way to tag work, model
+override, post-call usage) and the adapter is ~20 lines. See
+[integrations/](integrations/).
+
+## Honest limits
+
+This is a **reference implementation** with a fail-closed wrapper and a governance loop —
+not a universal control plane. Four limits, all reported by the tool itself
+(`meg gate check`, `meg observe coverage`):
+
+1. **Enforcement covers calls that pass through it.** A tool shelling out to a provider, or
+   a sub-process with its own API key, bypasses it. That is why coverage reconciliation
+   exists rather than being optional.
+2. **Missing caller metadata warns by default; it does not refuse.** A constraint nobody
+   supplied evidence for is *unchecked*, not satisfied. Set `require_full_metadata=True`
+   (Python) / `requireFullMetadata: true` (OpenClaw) to make it a refusal — recommended for
+   unattended agents, where nobody reads a warning.
+3. **4 of 6 bundled modes declare no machine-checkable constraints.** For those the gate
+   checks the mode name and nothing else; eligibility lives in prose that no runtime reads.
+4. **4 of 6 bundled modes have no regression spec.** A mode without one is a verdict nobody
+   re-measures.
 
 ## Scope: a gate, not a sandbox
 

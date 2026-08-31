@@ -17,7 +17,7 @@
     "explain": "tsx src/cli.ts explain",
     "check": "tsx src/check.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/parity.ts && python3 test/parity.py",
+    "test": "tsx test/parity.ts && python3 test/parity.py && npx tsx test/policy_parity.ts",
     "ci": "npm run typecheck && npm run check && npm test",
     "regression": "tsx eval/regression.ts",
     "regression:baseline": "tsx eval/regression.ts --update-baseline",

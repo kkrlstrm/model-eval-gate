@@ -96,17 +96,55 @@ PATTERN_LITERAL = re.compile(r'^\s*\(\s*r"')
 FIXTURE_MARKER = "meg-gate: fixture"
 
 
+def _skippable(rel: str) -> bool:
+    return (Path(rel).suffix.lower() in SKIP_SUFFIXES
+            or bool(SKIP_PARTS & set(Path(rel).parts)))
+
+
 def tracked_files() -> list[Path]:
     out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
                          capture_output=True, text=True, check=True).stdout
     files = []
     for rel in filter(None, out.split("\0")):
         p = ROOT / rel
-        if p.suffix.lower() in SKIP_SUFFIXES or SKIP_PARTS & set(Path(rel).parts):
+        if _skippable(rel):
             continue
         if p.is_file():
             files.append(p)
     return files
+
+
+def staged_sources() -> list[tuple[str, str]]:
+    """[(path, content)] for what is ABOUT TO BE COMMITTED, read from the index.
+
+    A pre-commit hook must not scan the working tree. The two differ in both
+    directions and each is a real way to leak:
+
+      * `git add` a file with a key, then fix the key on disk but not re-add it
+        -> the working tree is clean and the COMMIT still carries the key.
+      * `git add -p` a clean hunk from a file whose unstaged remainder has a key
+        -> the working tree looks dirty and the commit is fine.
+
+    Reading `git show :<path>` is the only thing that answers "what am I about to
+    put in history", which is the question that matters because a credential in
+    a commit stays there after the fix.
+    """
+    out = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"],
+        cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    sources: list[tuple[str, str]] = []
+    for rel in filter(None, out.split("\0")):
+        if _skippable(rel):
+            continue
+        blob = subprocess.run(["git", "show", f":{rel}"], cwd=ROOT,
+                              capture_output=True, check=False)
+        if blob.returncode != 0:
+            continue
+        try:
+            sources.append((rel, blob.stdout.decode("utf-8", errors="replace")))
+        except Exception:  # noqa: BLE001 — binary or undecodable: nothing to scan
+            continue
+    return sources
 
 
 def scan_text(rel: str, text: str) -> list[tuple[int, str, str]]:
@@ -135,27 +173,40 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true",
                     help="report findings but always exit 0")
+    ap.add_argument("--staged", action="store_true",
+                    help="scan the staged content about to be committed, not the "
+                         "working tree (used by the pre-commit hook)")
     a = ap.parse_args()
 
+    if a.staged:
+        sources = staged_sources()
+        what = f"{len(sources)} staged file(s)"
+    else:
+        sources = []
+        for path in tracked_files():
+            try:
+                sources.append((str(path.relative_to(ROOT)),
+                                path.read_text(errors="replace")))
+            except OSError:
+                continue
+        what = f"{len(sources)} tracked files"
+
     total = 0
-    for path in tracked_files():
-        rel = str(path.relative_to(ROOT))
-        try:
-            text = path.read_text(errors="replace")
-        except OSError:
-            continue
+    for rel, text in sources:
         for line_no, label, snippet in scan_text(rel, text):
             total += 1
             print(f"{rel}:{line_no}  {label}: {snippet}")
 
-    scanned = len(tracked_files())
     if total == 0:
-        print(f"ok — {scanned} tracked files, no credentials or real telemetry found.")
+        print(f"ok — {what}, no credentials or real telemetry found.")
         return 0
-    print(f"\n{total} finding(s) across {scanned} tracked files.")
+    print(f"\n{total} finding(s) across {what}.")
     print("This repository promises it ships no real data. Replace the value with a "
           "fictional one,\nor add an EXACT documentation literal to SAFE_LITERALS — "
           "never by loosening a pattern.")
+    if a.staged:
+        print("\nA credential in a commit stays in history after you fix it. If this is "
+              "a\ndeliberate test fixture, mark that line `# meg-gate: fixture`.")
     return 0 if a.list else 1
 
 

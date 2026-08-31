@@ -392,6 +392,51 @@ def test_data_gate_discriminates() -> None:
                             '  KEY = "sk-or-v1-abcdef0123456789abcdef"')))  # meg-gate: fixture
 
 
+def test_precommit_hook_is_installable_and_scans_the_index() -> None:
+    """The hook must exist, be executable, and read the INDEX rather than the tree.
+
+    Scanning the working tree at commit time is subtly wrong in both directions:
+    `git add` a key and then fix it on disk without re-adding leaves a clean tree
+    and a dirty commit, which is precisely the leak the hook exists to stop. The
+    staged reader is exercised against a throwaway repo so the check is real
+    rather than a file-exists assertion."""
+    import importlib.util
+    import os
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    hook = root / ".githooks" / "pre-commit"
+    truthy("pre-commit hook is tracked in the repo", hook.is_file())
+    truthy("pre-commit hook is executable", os.access(hook, os.X_OK))
+
+    spec = importlib.util.spec_from_file_location(
+        "vnrd_staged", root / "gates" / "verify_no_real_data.py")
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+
+    tmp = Path(tempfile.mkdtemp())
+    run = lambda *a: subprocess.run(a, cwd=tmp, capture_output=True, text=True)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@example.invalid")
+    run("git", "config", "user.name", "t")
+
+    leak = 'K = "sk-or-v1-' + "abcdef0123456789abcdef" + '"'   # meg-gate: fixture
+    (tmp / "app.py").write_text(leak + "\n")
+    run("git", "add", "app.py")
+    # The scenario CI cannot see: fix the file on disk, do NOT re-stage it.
+    (tmp / "app.py").write_text("K = os.environ['KEY']\n")
+
+    g.ROOT = tmp
+    staged = dict(g.staged_sources())
+    truthy("staged reader sees the file", "app.py" in staged)
+    truthy("staged content is the OLD, leaking version",
+           "sk-or-v1-" in staged.get("app.py", ""))
+    truthy("and the gate flags it", bool(g.scan_text("app.py", staged["app.py"])))
+    # ...while the clean working tree would have said nothing.
+    check("working tree alone would MISS it",
+          g.scan_text("app.py", (tmp / "app.py").read_text()), [])
+
+
 def test_postgres_backend() -> None:
     """The Postgres path, exercised for real — or skipped loudly.
 
@@ -464,6 +509,7 @@ def main() -> int:
     print("audit chain");                 test_audit_chain_detects_tampering()
     print("audit never raises");          test_audit_never_raises_into_a_call()
     print("data gate discriminates");      test_data_gate_discriminates()
+    print("pre-commit hook");             test_precommit_hook_is_installable_and_scans_the_index()
     print("postgres backend");            test_postgres_backend()
     print(f"\n{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failing check(s)")
     return 1 if FAILS else 0

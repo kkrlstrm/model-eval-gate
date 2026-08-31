@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# model-eval-gate — pre-commit hook.
+#
+# WHY COMMIT TIME AND NOT JUST CI. CI catches a leaked credential before it
+# merges; it does not stop it existing. Once a key is in a commit it is in the
+# history, and the fix is a rewrite plus a rotation rather than an edit. The
+# gates are ~130ms combined, which is cheap enough to pay on every commit for a
+# failure mode that cannot be undone.
+#
+# Install (one line, repo-local, nothing global touched):
+#     git config core.hooksPath .githooks
+#
+# The hooks live in a TRACKED directory rather than .git/hooks so they arrive
+# with a clone and can be reviewed in a diff. .git/hooks is not versioned, so a
+# hook that lives only there is a hook that only one machine has.
+#
+# Bypass with `git commit --no-verify`. That is a real hole and worth naming:
+# git offers no way for a hook to observe its own bypass, so CI remains the
+# backstop. The hook shortens the feedback loop; it is not the boundary.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 0
+
+PY="${MEG_PYTHON:-python3}"
+if ! command -v "$PY" >/dev/null 2>&1; then
+  echo "[model-eval-gate] $PY not found — skipping pre-commit gates." >&2
+  echo "[model-eval-gate] CI still enforces them. Set MEG_PYTHON to override." >&2
+  exit 0   # a missing interpreter must not make the repo uncommittable
+fi
+
+fail=0
+
+# 1. No credential or real telemetry in what is ABOUT TO BE COMMITTED.
+#    --staged reads the index, not the working tree: `git add` a key then fix it
+#    on disk without re-adding, and the tree is clean while the commit is not.
+if ! "$PY" gates/verify_no_real_data.py --staged; then
+  fail=1
+fi
+
+# 2. Docs must point at files, modes and CLI subcommands that exist.
+#    Only when something that can invalidate a reference is staged — renaming a
+#    file, editing a doc, or changing the policy. Running it on an unrelated
+#    commit is noise, and a gate that fires on noise gets bypassed.
+if git diff --cached --name-only --diff-filter=ACMRD |
+   grep -qE '\.md$|^routes\.json$|^meg/|^gates/|^examples/|^integrations/'; then
+  if ! "$PY" gates/verify_doc_refs.py; then
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  cat >&2 <<'EOF'
+
+[model-eval-gate] pre-commit gates failed — commit aborted.
+Fix the findings above, or bypass with `git commit --no-verify` (CI will still
+catch it, and a credential already written to a commit needs a rotation, not
+just an edit).
+EOF
+  exit 1
+fi
+
+exit 0

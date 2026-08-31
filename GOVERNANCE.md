@@ -160,6 +160,17 @@ intentions. Both run in CI:
   subcommand that does not exist. These docs are instructions an agent will act on; a dead
   path makes it improvise the thing the helper existed to prevent.
 
+Both also run at **commit time** via `.githooks/pre-commit` (`npm run hooks:install`). CI
+catches a leaked credential before it merges; it does not stop it existing, and a key in a
+commit needs a rotation rather than an edit. The hook scans the **index**, not the working
+tree, because those differ in both directions — staging a key and then fixing it on disk
+without re-adding leaves a clean tree and a dirty commit.
+
+Two limits, stated rather than papered over: `git commit --no-verify` bypasses the hook and
+git gives a hook no way to observe its own bypass, and a missing interpreter makes the hook
+skip rather than block. CI is the backstop; the hook shortens the loop, it is not the
+boundary.
+
 ## Enforcement has a boundary — know where it is
 
 This is a fail-closed gate **for calls that pass through it**. It is not a sandbox or a

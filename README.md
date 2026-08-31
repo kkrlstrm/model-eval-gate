@@ -163,6 +163,7 @@ A gate that can't tell these apart reports savings that don't exist.
 | **posture** — attended vs unattended | "nobody objected" being read as evidence at 3am. Attended nudges on an unproven constraint; unattended refuses |
 | **hash-chained audit log** | a decision quietly reclassified after something went wrong — `meg.audit.verify()` locates the first edited line |
 | `gates/verify_no_real_data.py` | this repo breaking its own "ships no real data" promise, which until it existed was enforced by nobody |
+| pre-commit hook, scanning the **index** | a credential reaching history at all — CI catches a leak before it merges, but not before it exists, and a key in a commit needs a rotation rather than an edit |
 | `gates/verify_doc_refs.py` | a doc telling an agent to run a file that no longer exists, so it improvises the thing the helper prevented |
 | `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
 
@@ -297,8 +298,14 @@ To make it a real control plane rather than a governed helper, **make it the onl
 git clone https://github.com/kkrlstrm/model-eval-gate && cd model-eval-gate
 pip install -e .          # the `meg` pipeline (stdlib-only)
 npm install               # the TS gate/CLI + regression harness
+npm run hooks:install     # pre-commit gates (~130ms, repo-local)
 cp .env.example .env      # add your OPENROUTER_API_KEY
 ```
+
+`hooks:install` sets `core.hooksPath` to the tracked `.githooks/` directory — nothing global
+is touched, and the hooks arrive with a clone instead of living only in one machine's
+untracked `.git/hooks`. It runs the two repo gates on **staged content** before every
+commit. Bypass with `git commit --no-verify`; CI runs the same gates either way.
 
 The `meg` pipeline needs Python 3.10+ and no third-party packages. The TS gate needs Node
 18+. An [OpenRouter](https://openrouter.ai) key is required for live calls and the model

@@ -22,7 +22,9 @@
     "regression": "tsx eval/regression.ts",
     "regression:baseline": "tsx eval/regression.ts --update-baseline",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit gates installed (bypass: git commit --no-verify)'",
+    "gates": "python3 gates/verify_no_real_data.py && python3 gates/verify_doc_refs.py"
   },
   "dependencies": {
     "@openrouter/agent": "^0.6.0",

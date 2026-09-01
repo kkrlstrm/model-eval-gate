@@ -32,7 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ["README.md", "GOVERNANCE.md", "docs/ARCHITECTURE.md", "docs/ADDING_A_MODE.md",
-        "integrations/README.md"]
+        "integrations/README.md", "integrations/ori/README.md"]
 
 # Link targets that are not repo paths.
 EXTERNAL = re.compile(r"^(https?:|mailto:|#|\.\./\.\./)")

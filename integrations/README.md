@@ -50,6 +50,13 @@ cannot break one.
 | **Hermes** | `pre_llm_call` | ⚠️ not cleanly — see below | **advisory only** |
 | anything else | — | — | write ~20 lines against the contract above |
 
+There is also one **tooling** adapter, which is a different shape from the two above — it
+enforces nothing at runtime and moves work between an eval product and this policy:
+[`ori/`](ori/) ([Ori Eval](https://openrouter.ai/blog/announcements/ori-eval), OpenRouter).
+It emits a governed spec as a runnable Ori eval, and imports an Ori run back as a
+**proposal** — never as a mode. Ori is optional: both directions are pure file operations
+and every spec stays runnable by this repo's own harness without it.
+
 ### OpenClaw — enforcing
 
 [`integrations/openclaw/`](openclaw/). OpenClaw's `before_model_resolve` runs before the

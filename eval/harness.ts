@@ -15,9 +15,22 @@
  */
 import type { OpenRouter } from '@openrouter/sdk';
 import { callModel } from '@openrouter/agent';
-import type { Grader, GraderResult } from './graders.ts';
+import type { Grader, GraderResult, ToolCall } from './graders.ts';
 
-export type Task = { id: string; input: string | any[]; gold: any };
+export type Task = {
+  id: string;
+  input: string | any[];
+  gold: any;
+  /**
+   * Optional RECORDED trajectory for this task — the tool calls a real agent run
+   * made, frozen into the spec. This harness issues a single model call and runs
+   * no agent loop, so it cannot observe a trajectory itself; a trajectory grader
+   * is scored against this recording, or against one supplied by an adapter that
+   * does run an agent (integrations/ori). Absent it, trajectory graders FAIL
+   * rather than silently pass.
+   */
+  trajectory?: ToolCall[];
+};
 export type ModelSpec = {
   model: string;
   label?: string;
@@ -114,9 +127,18 @@ async function runTrial(
 
   const grs: GraderResult[] = [];
   let graderThrew = false;
+  // Cost/latency are measured above, so budget graders score THIS trial's real
+  // numbers; the trajectory is whatever the spec recorded for this task.
+  const ctx = {
+    gold: task.gold,
+    client,
+    text,
+    trajectory: task.trajectory,
+    usage: { costUsd: cost, ms },
+  };
   for (const g of graders) {
     try {
-      grs.push(await g.grade(parsed, { gold: task.gold, client }));
+      grs.push(await g.grade(parsed, ctx));
     } catch {
       graderThrew = true;
     }

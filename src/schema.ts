@@ -78,6 +78,10 @@ export type ModeDef = z.infer<typeof Mode>;
 
 // ── regression spec schema ──
 const GraderCfg = z.looseObject({ kind: z.string().min(1), name: z.string().optional() });
+
+/** A recorded tool call, frozen into a task so trajectory graders are reproducible. */
+const ToolCallSchema = z.looseObject({ name: z.string().min(1) });
+
 export const SpecSchema = z.strictObject({
   mode: z.string().min(1),
   title: z.string().min(1),
@@ -88,9 +92,31 @@ export const SpecSchema = z.strictObject({
   consistency_floor: z.number().min(0).max(1).optional(),
   baseline: z.looseObject({}).optional(),
   input_template: z.string().min(1),
+  /**
+   * How to read the model's output. 'json' (default) parses the first JSON object
+   * and treats unparseable output as a parse_failure. 'text' passes the raw string
+   * through — required for prose/agent answers graded by trajectory, mentions or a
+   * judge, which would otherwise register as a parse failure on every trial and be
+   * reported as drift.
+   */
+  output_format: z.enum(['json', 'text']).optional(),
+  /** Provenance for a spec generated from an external eval tool (see integrations/). */
+  source: z
+    .looseObject({
+      tool: z.string().min(1),
+      imported_at: z.string().regex(ISO_DATE, 'must be an ISO date (YYYY-MM-DD)').optional(),
+    })
+    .optional(),
   graders: z.array(GraderCfg).nonempty(),
   tasks: z
-    .array(z.looseObject({ id: z.string(), vars: z.record(z.string(), z.any()), gold: z.any() }))
+    .array(
+      z.looseObject({
+        id: z.string(),
+        vars: z.record(z.string(), z.any()),
+        gold: z.any(),
+        trajectory: z.array(ToolCallSchema).optional(),
+      }),
+    )
     .nonempty(),
 });
 

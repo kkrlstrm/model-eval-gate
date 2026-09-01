@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { OpenRouter } from '@openrouter/sdk';
 import { runSuite, type ModelSpec, type Task } from './harness.ts';
-import { buildGrader } from './graders.ts';
+import { buildGrader, TRAJECTORY_GRADER_KINDS } from './graders.ts';
 import { loadRoutesOrExit, validateSpec } from '../src/schema.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // eval/
@@ -110,8 +110,24 @@ for (const specPath of specFiles) {
     id: t.id,
     input: render(spec.input_template, t.vars),
     gold: t.gold,
+    trajectory: t.trajectory,
   }));
   const graders = spec.graders.map(buildGrader);
+
+  // A prose/agent spec must not be read with the JSON parser, or every trial
+  // registers as parse_failure and gets reported as drift.
+  const parse = spec.output_format === 'text' ? (s: string) => s ?? null : parseJsonObject;
+
+  // A trajectory grader with no recorded trajectory fails by design (unchecked is
+  // not satisfied). Say so up front, so the cause is obvious in the output rather
+  // than looking like the model regressed.
+  const needsTrajectory = spec.graders.some((g: any) => TRAJECTORY_GRADER_KINDS.has(g.kind));
+  const haveTrajectory = spec.tasks.some((t: any) => Array.isArray(t.trajectory));
+  if (needsTrajectory && !haveTrajectory) {
+    console.log(
+      `   ⚠ spec declares a trajectory grader but no task carries a recorded trajectory —\n     those assertions will FAIL as unverifiable, not pass. Record one (see integrations/ori).`,
+    );
+  }
 
   console.log(`\n══ ${spec.mode} · ${spec.title} ══`);
   console.log(
@@ -122,7 +138,7 @@ for (const specPath of specFiles) {
     client,
     spec: modelSpec,
     tasks,
-    parse: parseJsonObject,
+    parse,
     graders,
     k,
     threshold: spec.threshold ?? 0.66,

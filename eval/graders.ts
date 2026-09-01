@@ -19,10 +19,16 @@ export type GraderResult = {
   assertions: Assertion[];
 };
 
+/** One tool invocation observed during an agent run. */
+export type ToolCall = { name: string; args?: any; ok?: boolean };
+
 /** Context handed to every grader for a single output. */
 export type GradeCtx = {
   gold: any; // frozen reference / labels for this task
   client?: OpenRouter; // present only when a model grader is used
+  text?: string; // raw model output, before parsing (prose answers never parse)
+  trajectory?: ToolCall[]; // what the agent DID — see the trajectory graders below
+  usage?: { costUsd?: number; ms?: number }; // this trial's measured cost/latency
 };
 
 export type Grader = {
@@ -199,6 +205,157 @@ export function jsonSubsetGrader(name: string): Grader {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TRAJECTORY + BUDGET graders — assert over what the agent DID and what the run
+// COST, not only over what it said. An output grader cannot catch a support agent
+// that issues a refund without ever calling `lookup_order`: the prose is fine, the
+// behaviour is not.
+//
+// Two properties make these safe to rely on:
+//
+//   1. They do NOT go through codeGrader(), because they must not require the
+//      output to parse as JSON. An agent's final answer is usually prose.
+//   2. **Missing evidence FAILS.** If no trajectory was recorded, `toolCalled`
+//      does not pass ("we never saw it call the tool") and `toolNotCalled` does
+//      not pass either ("we cannot prove it didn't"). An unverifiable assertion is
+//      unchecked, not satisfied — the same rule the gate applies to absent caller
+//      metadata (GOVERNANCE.md). Silently passing here would let a spec advertise
+//      behavioural coverage it never had.
+//
+// Where a trajectory comes from: this repo's own harness makes a SINGLE model
+// call, so it produces no trajectory of its own. Trajectories arrive either
+// frozen in the spec (`tasks[].trajectory`, recorded from a real run — the same
+// pattern as recordedHumanGrader) or from an adapter that runs a real agent loop,
+// e.g. integrations/ori. That limit is deliberate and documented rather than
+// papered over.
+// ─────────────────────────────────────────────────────────────────────────────
+const NO_TRAJECTORY =
+  'no trajectory recorded — assertion unverifiable (unchecked is not satisfied)';
+
+/** Build a grader that reads GradeCtx directly and never requires parsed JSON. */
+function ctxGrader(
+  name: string,
+  fn: (parsed: any, ctx: GradeCtx) => Assertion[],
+  kind: GraderKind = 'code',
+): Grader {
+  return {
+    name,
+    kind,
+    grade: (parsed, ctx) => {
+      const assertions = fn(parsed, ctx);
+      return { grader: name, kind, score: scoreOf(assertions), assertions };
+    },
+  };
+}
+
+/** Every named tool MUST appear in the run's trajectory. */
+export function toolCalledGrader(name: string, tools: string[]): Grader {
+  return ctxGrader(name, (_parsed, ctx) =>
+    tools.map((t) => {
+      if (ctx.trajectory == null)
+        return { name: `called:${t}`, pass: false, detail: NO_TRAJECTORY };
+      const hit = ctx.trajectory.some((c) => c?.name === t);
+      return {
+        name: `called:${t}`,
+        pass: hit,
+        detail: hit ? undefined : `tool "${t}" was never called`,
+      };
+    }),
+  );
+}
+
+/**
+ * No named tool may appear in the trajectory. This is the destructive-action
+ * guard (`delete_file`, `issue_refund`) — the assertion whose failure matters
+ * most and which no output grader can make.
+ */
+export function toolNotCalledGrader(name: string, tools: string[]): Grader {
+  return ctxGrader(name, (_parsed, ctx) =>
+    tools.map((t) => {
+      if (ctx.trajectory == null)
+        return { name: `not-called:${t}`, pass: false, detail: NO_TRAJECTORY };
+      const hit = ctx.trajectory.some((c) => c?.name === t);
+      return {
+        name: `not-called:${t}`,
+        pass: !hit,
+        detail: hit ? `forbidden tool "${t}" WAS called` : undefined,
+      };
+    }),
+  );
+}
+
+/**
+ * The named tools must be called in this relative order (other calls may be
+ * interleaved). Catches "it looked up the order, but only after refunding."
+ */
+export function toolSequenceGrader(name: string, sequence: string[]): Grader {
+  return ctxGrader(name, (_parsed, ctx) => {
+    if (ctx.trajectory == null) return [{ name: 'sequence', pass: false, detail: NO_TRAJECTORY }];
+    const names = ctx.trajectory.map((c) => c?.name);
+    let cursor = -1;
+    for (const step of sequence) {
+      const at = names.indexOf(step, cursor + 1);
+      if (at === -1)
+        return [
+          {
+            name: 'sequence',
+            pass: false,
+            detail: `expected ${sequence.join(' → ')}; "${step}" not found after position ${cursor}`,
+          },
+        ];
+      cursor = at;
+    }
+    return [{ name: 'sequence', pass: true }];
+  });
+}
+
+/** The output must mention every one of these substrings (inverse of mustNotContain). */
+export function mentionsGrader(name: string, substrings: string[]): Grader {
+  return ctxGrader(name, (parsed, ctx) => {
+    const hay = (ctx.text ?? JSON.stringify(parsed ?? '')).toLowerCase();
+    return substrings.map((s) => {
+      const hit = hay.includes(s.toLowerCase());
+      return {
+        name: `mentions:${s}`,
+        pass: hit,
+        detail: hit ? undefined : `output never mentioned "${s}"`,
+      };
+    });
+  });
+}
+
+/** This trial must have cost at most `maxUsd`. Unmeasured cost fails. */
+export function costAtMostGrader(name: string, maxUsd: number): Grader {
+  return ctxGrader(name, (_parsed, ctx) => {
+    const c = ctx.usage?.costUsd;
+    if (c == null)
+      return [{ name: 'cost', pass: false, detail: 'cost not measured for this trial' }];
+    return [
+      {
+        name: 'cost',
+        pass: c <= maxUsd,
+        detail: c <= maxUsd ? undefined : `$${c.toFixed(4)} > cap $${maxUsd.toFixed(4)}`,
+      },
+    ];
+  });
+}
+
+/** This trial must have finished within `maxMs`. Unmeasured latency fails. */
+export function latencyAtMostGrader(name: string, maxMs: number): Grader {
+  return ctxGrader(name, (_parsed, ctx) => {
+    const ms = ctx.usage?.ms;
+    if (ms == null)
+      return [{ name: 'latency', pass: false, detail: 'latency not measured for this trial' }];
+    return [
+      {
+        name: 'latency',
+        pass: ms <= maxMs,
+        detail: ms <= maxMs ? undefined : `${ms}ms > cap ${maxMs}ms`,
+      },
+    ];
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MODEL grader — an LLM judges the output against a rubric (0..1). Opt-in.
 // ─────────────────────────────────────────────────────────────────────────────
 export function llmJudgeGrader(name: string, judgeModel: string, rubric: string): Grader {
@@ -286,7 +443,21 @@ export const GRADER_KINDS = new Set([
   'jsonSubset',
   'human',
   'llmJudge',
+  // trajectory + budget — assert over what the agent did and what the run cost
+  'toolCalled',
+  'toolNotCalled',
+  'toolSequence',
+  'mentions',
+  'costAtMost',
+  'latencyAtMost',
 ]);
+
+/**
+ * Grader kinds that need a recorded/live trajectory. `check` uses this to warn
+ * when a spec declares one but no task carries a trajectory — otherwise the spec
+ * would fail every run for a reason that reads like a model regression.
+ */
+export const TRAJECTORY_GRADER_KINDS = new Set(['toolCalled', 'toolNotCalled', 'toolSequence']);
 
 export function buildGrader(cfg: any): Grader {
   switch (cfg.kind) {
@@ -310,6 +481,18 @@ export function buildGrader(cfg: any): Grader {
       return recordedHumanGrader(cfg.name ?? 'human');
     case 'llmJudge':
       return llmJudgeGrader(cfg.name ?? 'judge', cfg.model, cfg.rubric);
+    case 'toolCalled':
+      return toolCalledGrader(cfg.name ?? 'tool-called', cfg.tools ?? []);
+    case 'toolNotCalled':
+      return toolNotCalledGrader(cfg.name ?? 'tool-not-called', cfg.tools ?? []);
+    case 'toolSequence':
+      return toolSequenceGrader(cfg.name ?? 'tool-sequence', cfg.sequence ?? []);
+    case 'mentions':
+      return mentionsGrader(cfg.name ?? 'mentions', cfg.substrings ?? []);
+    case 'costAtMost':
+      return costAtMostGrader(cfg.name ?? 'cost', Number(cfg.maxUsd));
+    case 'latencyAtMost':
+      return latencyAtMostGrader(cfg.name ?? 'latency', Number(cfg.maxMs));
     default:
       throw new Error(`unknown grader kind: ${cfg.kind}`);
   }

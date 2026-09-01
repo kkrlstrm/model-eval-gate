@@ -215,6 +215,38 @@ user actually does, with new-mode recommendations that a human approves.
 > Cost-first routers tell you what is cheap.
 > This tells you what is **safe to move** — and what isn't.
 
+Three neighbours, three different jobs. None is a competitor, and saying so precisely
+matters more now that the eval half has a good default:
+
+| layer | example | decides |
+|---|---|---|
+| eval platform | **Ori Eval**, Promptfoo, Braintrust | *which model scores best on this task* |
+| gateway | OpenRouter, LiteLLM | *how the call executes* — provider, fallback, cost |
+| **this** | model-eval-gate | *whether the work may be delegated at all, and whether that is still true* |
+
+**Ori Eval picks the winner. This decides whether there should be one.** The seam is
+[`integrations/ori/`](../integrations/ori/): emit a governed spec as a runnable Ori eval,
+import an Ori run back as a **proposal** — never as a mode.
+
+The sharp edge is worth naming, because it states this project's thesis by counterexample.
+Ori's scheduled workflow is *re-run monthly; when a model scores better, open a PR you merge.*
+Good default for a coding agent's model; bad one for a governed mode, because it makes
+"scored better" a permission — on a single run, with no negative constraint, no pass^k, no
+provider pin, and no dated record of what was replaced. Property 2 above exists precisely
+because a verdict is not a permission until a human writes down what it must **not** be used
+for.
+
+Two design rules follow, and they bind any future adapter:
+
+- **Adapters are optional in both directions.** Nothing here may require an external eval
+  tool to be installed. Emission and import are pure file operations, and every spec stays
+  runnable by this repo's own harness. An integration that becomes a dependency has changed
+  what the project is.
+- **Translation must never silently weaken a check.** A grader with no faithful equivalent in
+  the target tool is *reported as unmapped*, not approximated; an export whose assertions all
+  fell away is refused rather than written. An eval that checks less than its spec while
+  looking green is a worse artifact than no eval at all.
+
 ---
 
 ## Data policy

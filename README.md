@@ -123,12 +123,38 @@ Three ideas do the work:
 
 ## Not an eval framework
 
-model-eval-gate doesn't replace your eval platform (Promptfoo, Braintrust, Harbor, your own harness). It **consumes eval decisions and keeps them honest:**
+model-eval-gate doesn't replace your eval platform ([Ori Eval](https://openrouter.ai/blog/announcements/ori-eval), Promptfoo, Braintrust, Harbor, your own harness). It **consumes eval decisions and keeps them honest:**
 
 - an **initial eval** decides whether a mode may exist;
 - a **regression spec** checks whether that permission is still valid.
 
 The included harness is policy *maintenance*, not a competing eval product.
+
+> **Ori Eval picks the winner. This decides whether there should be one — and whether that is still true next month.**
+
+That distinction is easy to lose, so it is worth making concrete. Ori's documented scheduled
+workflow is: re-run monthly, and when a model scores better than the incumbent, **open a PR
+you merge**. For a coding agent's default model that is a good default. For a *governed mode*
+it is the failure this repo exists to prevent — a model swap merged on a single run, with no
+`do_not_use_when`, no pass^k consistency check, no provider pin, and no dated record of what
+was replaced or why. **Cheaper is not a permission; neither is "scored better."**
+
+They compose, and [`integrations/ori/`](integrations/ori/) is the seam:
+
+```bash
+npm run ori status                              # is Ori usable here — and what works if it isn't
+npm run ori emit   -- --mode support-triage     # a governed spec  → a runnable Ori *.eval.ts
+npm run ori import -- --mode support-triage     # an Ori run       → a PROPOSAL, never routes.json
+```
+
+`import` writes a frozen regression spec and a mode **stub** whose `use_when` /
+`do_not_use_when` are deliberately left `TODO` — the negative constraint comes from a human
+reading the failures, and no eval tool can infer it. It also states what the run does *not*
+establish: pass^k, a provider pin, and the subscription counterfactual.
+
+**Ori is optional.** Both directions are pure file operations, and every spec stays runnable
+by this repo's own harness without it. What Ori adds is the half this harness deliberately
+does not do — running a real agent loop to *produce* a trajectory.
 
 ## Where the modes come from (v2)
 
@@ -247,8 +273,8 @@ specs (with fictionalised corpora) are the most useful PR you can send.
 This is a **reference implementation** with a fail-closed wrapper and a governance loop —
 a *delegation policy engine*, not a universal agent control plane. That is the destination,
 and reaching it needs three things this does not yet have: a hardened egress boundary,
-persisted framework telemetry, and broader adapters. Five limits, all reported by the tool
-itself (`meg gate check`, `meg observe coverage`):
+persisted framework telemetry, and broader adapters. Eight limits, all reported by the tool
+itself (`meg gate check`, `meg observe coverage`, `npm run ori status`):
 
 1. **Enforcement covers calls that pass through it.** A tool shelling out to a provider, or
    a sub-process with its own API key, bypasses it. That is why coverage reconciliation
@@ -269,6 +295,15 @@ itself (`meg gate check`, `meg observe coverage`):
    and records decisions; it does not persist OpenClaw calls to the telemetry store, does
    not inject nudge text into the prompt, and reduces a multi-field provider pin to its
    first provider name. Each is a runtime integration step, not a policy gap.
+7. **This harness cannot produce a trajectory.** It issues a single model call and runs no
+   agent loop, so trajectory graders score against a trajectory *recorded* in the spec, or
+   one supplied by an adapter that does run an agent. Assert on one, don't generate one.
+8. **The Ori importer reads an undocumented record shape.** Ori documents that runs land in
+   `.ori/eval/history.jsonl`, but not the per-record fields. The importer probes several
+   plausible names, leaves what it cannot find *absent rather than defaulted*, and reports
+   unparseable or unattributable records as blockers — so a schema change degrades to "I
+   could not attribute these" rather than a confident wrong verdict. It is still a shape
+   this repo inferred, not one that was promised.
 
 ## Scope: a gate, not a sandbox
 
@@ -322,6 +357,9 @@ shipped silently before the guard existed.
 | `gates/verify_no_real_data.py` | this repo breaking its own "ships no real data" promise, which until it existed was enforced by nobody |
 | pre-commit hook, scanning the **index** | a credential reaching history at all — CI catches a leak before it merges, but not before it exists, and a key in a commit needs a rotation rather than an edit |
 | `gates/verify_doc_refs.py` | a doc telling an agent to run a file that no longer exists, so it improvises the thing the helper prevented |
+| **vacuous-emit refusal** (`ori emit`) | exporting an eval whose only surviving assertion is `toComplete()` — green whatever the model says. The first spec emitted to Ori produced exactly that, because every one of its graders was a gold comparison Ori's API cannot express |
+| **unmapped graders reported, never approximated** | an exported eval silently checking something *weaker* than the spec it came from, and a green run there being read as evidence about the mode |
+| **absent trajectory fails both ways** | a spec advertising behavioural coverage it never had — `toolNotCalled` "passing" because nothing was recorded is not proof the tool went uncalled |
 | `COALESCE` merge on every upsert | a partial write blanking the columns the other half established — a call record arrives in two halves and neither carries the other's fields |
 
 ## Install
@@ -402,7 +440,7 @@ One file is the source of truth, read live by both the CLI and the Python port:
 
 The six modes shipped here are **realistic examples** to show the shape. Replace them with modes your own evals justify. See **[GOVERNANCE.md](GOVERNANCE.md)** for the policy and **[docs/ADDING_A_MODE.md](docs/ADDING_A_MODE.md)** for the workflow.
 
-## Three things that keep the policy honest
+## Four things that keep the policy honest
 
 ### 1. Provider pinning — the eval→prod drift guard
 
@@ -429,6 +467,14 @@ Specs live in `eval/regression/*.json` and ship with a **synthetic corpus** (fab
 ### 3. A three-grader taxonomy
 
 `eval/graders.ts` implements the [three grader kinds from Anthropic's evals guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents): **code** (deterministic — the default; field-agreement, normalized, enum, numeric-tolerance, array-set, must-not-contain, regex, json-subset), **model** (LLM-as-judge, opt-in), **human** (a recorded verdict frozen into the spec). A regression run separates model-quality drift from `provider_unavailable` / `parse_failure` / `grader_failure`, so a transient outage never looks like a regression.
+
+### 4. Trajectory assertions — grading what the agent *did*
+
+An output grader cannot catch a support agent that issues a refund without ever calling `lookup_order`: the prose is fine, the behaviour is not. Six kinds cover that — `toolCalled`, `toolNotCalled`, `toolSequence`, `mentions`, `costAtMost`, `latencyAtMost`.
+
+**Missing evidence fails.** With no trajectory recorded, `toolCalled` does not pass ("we never saw it call the tool") and `toolNotCalled` does not pass either ("we cannot prove it didn't"). Same rule the gate applies to absent caller metadata: unchecked is not satisfied. Silently passing there would let a spec advertise behavioural coverage it never had — which is worse than having no assertion, because it reads as coverage.
+
+This harness makes a **single model call** and runs no agent loop, so it never observes a trajectory itself. One is either frozen into the spec (`tasks[].trajectory`, recorded from a real run — the same pattern as the human grader) or produced by an adapter that does run an agent, e.g. [`integrations/ori/`](integrations/ori/). That limit is real and stated rather than papered over.
 
 ## Layout
 

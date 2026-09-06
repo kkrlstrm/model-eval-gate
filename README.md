@@ -14,9 +14,16 @@ If you are running a single-model chatbot, you do not need this.
 
 **Cheaper is not a permission.**
 
-```
-observe real work → find eligible workloads → evaluate candidates on real task shapes
-   → publish a narrow permission → enforce it → detect drift and bypass
+```mermaid
+flowchart TD
+    Eval["Eval on real task data"] --> Policy["Narrow permission"]
+    Task["Agent task"] --> Gate{"Permission matches<br/>this task?"}
+    Policy --> Gate
+    Gate -->|Yes| Delegate["Approved smaller model"]
+    Gate -->|"No / unknown"| Frontier["Frontier model"]
+    Delegate --> Regression["Regression re-check"]
+    Regression -->|Pass| Policy
+    Regression -->|Drift| Frontier
 ```
 
 **Illustrative output** — the three outcomes it produces (fictional data; see [Data policy](#data-policy)):

@@ -1,9 +1,15 @@
 # model-eval-gate — a delegation policy engine for AI agents
 
 <!-- portfolio-status -->
-**Status:** Reference implementation — extracted from a private production GTM system; tenant data, provider adapters, and company-specific policy stay private. · **Layer:** Quality & policy enforcement · **[Portfolio map ›](https://github.com/kkrlstrm)**
+**Status:** Reference implementation of the model gateway in an [internal GTM platform](https://github.com/kkrlstrm/internal-gtm-platform). Tenant data, provider adapters and company-specific policy stay private. · **Layer:** Model gateway · **[Portfolio map ›](https://github.com/kkrlstrm)**
 
 > **Agents can plan freely. They cannot downgrade freely.**
+
+model-eval-gate decides which model may take which task. An agent may hand a task to a cheaper
+model only after an evaluation on real task data has cleared that exact task, and a scheduled
+regression re-runs each clearance to catch drift. Everything without a clearance stays on the
+frontier model. In the platform it came from, nine task types hold a clearance and one more is
+on trial; everything else is refused.
 
 model-eval-gate turns observed agent work and real evaluations into **versioned delegation
 policy** that runtimes such as OpenClaw can enforce.

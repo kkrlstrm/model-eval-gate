@@ -20,14 +20,21 @@
  *   npx tsx eval/regression.ts --mode filter-auto-reply
  *   npx tsx eval/regression.ts --spec eval/regression/auto-reply.json --k 5
  *   npx tsx eval/regression.ts --update-baseline   # record current numbers as the new baseline
+ *   npx tsx eval/regression.ts --route-evals out/  # also write a re-clearance result per clean mode
+ *
+ * --route-evals writes <mode>.route-eval.json (runtune.route-eval/1, no incumbent) for every
+ * mode whose run raised no signal. A clean run on the routed model is the re-check a stale
+ * clearance needs; RunTune re-clears the mode with it (`runtune apply <id> --eval <file>`).
  */
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { OpenRouter } from '@openrouter/sdk';
-import { runSuite, type ModelSpec, type Task } from './harness.ts';
-import { buildGrader, TRAJECTORY_GRADER_KINDS } from './graders.ts';
-import { loadRoutesOrExit, validateSpec } from '../src/schema.ts';
+import { runSuite, type ModelSpec } from './harness.ts';
+import { TRAJECTORY_GRADER_KINDS } from './graders.ts';
+import { loadRoutesOrExit } from '../src/schema.ts';
+import { loadSpec } from './spec.ts';
+import { buildRouteEval } from './route_eval.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // eval/
 const ROUTES = loadRoutesOrExit(join(HERE, '..', 'routes.json')); // validated, fail-closed
@@ -43,6 +50,7 @@ const kOverride = flag('--k') ? Number(flag('--k')) : undefined;
 const onlyMode = flag('--mode');
 const onlySpec = flag('--spec');
 const updateBaseline = has('--update-baseline');
+const routeEvalDir = flag('--route-evals');
 
 // ── which specs ──
 const specDir = join(HERE, 'regression');
@@ -51,24 +59,6 @@ const specFiles = onlySpec
   : readdirSync(specDir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => join(specDir, f));
-
-function parseJsonObject(text: string): any {
-  const s = (text ?? '')
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '');
-  const m = s.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]);
-  } catch {
-    return null;
-  }
-}
-
-function render(tpl: string, vars: Record<string, any>): string {
-  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => String(vars?.[k] ?? ''));
-}
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
 if (!process.env.OPENROUTER_API_KEY) {
@@ -81,14 +71,15 @@ const allResults: any[] = [];
 let anyDrift = false;
 
 for (const specPath of specFiles) {
-  const rawSpec = JSON.parse(readFileSync(specPath, 'utf8'));
-  const sv = validateSpec(rawSpec);
-  if (!sv.ok) {
-    console.error(`✗ ${specPath}: invalid regression spec — ${sv.errors.join('; ')}`);
+  let loaded;
+  try {
+    loaded = loadSpec(specPath);
+  } catch (e: any) {
+    console.error(`✗ ${e.message}`);
     anyDrift = true;
     continue;
   }
-  const spec: any = rawSpec;
+  const { spec, tasks, graders, parse, sha256 } = loaded;
   if (onlyMode && spec.mode !== onlyMode) continue;
 
   const routeMode = ROUTES.modes?.[spec.mode];
@@ -106,18 +97,6 @@ for (const specPath of specFiles) {
     priceOut: routeMode.priceOut ?? 0,
     provider: routeMode.provider ?? null,
   };
-  const tasks: Task[] = spec.tasks.map((t: any) => ({
-    id: t.id,
-    input: render(spec.input_template, t.vars),
-    gold: t.gold,
-    trajectory: t.trajectory,
-  }));
-  const graders = spec.graders.map(buildGrader);
-
-  // A prose/agent spec must not be read with the JSON parser, or every trial
-  // registers as parse_failure and gets reported as drift.
-  const parse = spec.output_format === 'text' ? (s: string) => s ?? null : parseJsonObject;
-
   // A trajectory grader with no recorded trajectory fails by design (unchecked is
   // not satisfied). Say so up front, so the cause is obvious in the output rather
   // than looking like the model regressed.
@@ -228,6 +207,15 @@ for (const specPath of specFiles) {
       writeFileSync(specPath, JSON.stringify(spec, null, 2) + '\n');
       console.log(`   ↳ baseline updated in ${specPath}`);
     }
+  }
+
+  if (routeEvalDir && !signals.length) {
+    const doc = buildRouteEval({ mode: spec.mode, candidate: suite, spec,
+                                 harness: 'model-eval-gate eval/regression.ts', specPath, specSha256: sha256 });
+    mkdirSync(routeEvalDir, { recursive: true });
+    const p = join(routeEvalDir, `${spec.mode}.route-eval.json`);
+    writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');
+    console.log(`   ↳ re-clearance result (${doc.verdict}) written to ${p}`);
   }
 
   // Per-task detail for any task that wasn't a clean sweep — surfaces *what*

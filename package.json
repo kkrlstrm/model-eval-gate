@@ -22,7 +22,7 @@
     "explain": "tsx src/cli.ts explain",
     "check": "tsx src/check.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/parity.ts && python3 test/parity.py && npx tsx test/policy_parity.ts && npx tsx test/graders_ori.ts",
+    "test": "tsx test/parity.ts && python3 test/parity.py && npx tsx test/policy_parity.ts && npx tsx test/graders_ori.ts && npx tsx test/routes_parity.ts && npx tsx test/route_eval.ts && python3 test/contract_runtune.py",
     "ci": "npm run typecheck && npm run check && npm test",
     "ori": "tsx integrations/ori/cli.ts",
     "regression": "tsx eval/regression.ts",
@@ -30,7 +30,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit gates installed (bypass: git commit --no-verify)'",
-    "gates": "python3 gates/verify_no_real_data.py && python3 gates/verify_doc_refs.py"
+    "gates": "python3 gates/verify_no_real_data.py && python3 gates/verify_doc_refs.py",
+    "bakeoff": "tsx eval/bakeoff.ts"
   },
   "dependencies": {
     "@openrouter/agent": "^0.6.0",

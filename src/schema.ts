@@ -46,25 +46,55 @@ const Constraints = z.strictObject({
   max_stakes: z.enum(['low', 'medium', 'high']).optional(),
 });
 
-const Mode = z.strictObject({
+/**
+ * An object whose unknown keys are errors, except annotations: a key starting with `_`
+ * (`_readme`, `_caveat`) is a comment on the policy, not a field. Anything else unknown
+ * is refused so a misspelt field cannot be silently ignored. meg/routes_schema.py
+ * applies the same rule.
+ */
+function annotated<T extends z.ZodRawShape>(shape: T) {
+  return z.looseObject(shape).superRefine((obj, ctx) => {
+    for (const key of Object.keys(obj))
+      if (!(key in shape) && !key.startsWith('_'))
+        ctx.addIssue({ code: 'custom', message: `Unrecognized key: "${key}"`, path: [key] });
+  });
+}
+
+/**
+ * A CLEARED mode (the default) names its evidence and when not to use it: it exists
+ * because an eval cleared it. A TRIAL mode is authorised for a bounded trial before any
+ * eval has, and may omit both.
+ */
+const Mode = annotated({
   model: z.string().min(1),
   priceIn: z.number().nonnegative(),
   priceOut: z.number().nonnegative(),
   purpose: z.string().min(1),
   use_when: z.string().min(1),
-  do_not_use_when: z.string().min(1),
-  evidence_ref: z.string().optional(),
+  do_not_use_when: z.string().min(1).optional(),
+  evidence_ref: z.string().min(1).optional(),
   verified_date: z.string().regex(ISO_DATE, 'must be an ISO date (YYYY-MM-DD)'),
   provider: ProviderPin.nullable().optional(),
   constraints: Constraints.optional(),
+  status: z.enum(['cleared', 'trial']).optional(),
+}).superRefine((m, ctx) => {
+  if ((m.status ?? 'cleared') === 'trial') return;
+  for (const f of ['do_not_use_when', 'evidence_ref'] as const)
+    if (!m[f])
+      ctx.addIssue({
+        code: 'custom',
+        path: [f],
+        message: f === 'evidence_ref' ? 'required for a cleared mode (a cleared mode names its evidence)'
+                                      : 'required for a cleared mode',
+      });
 });
 
-const Retired = z.strictObject({
+const Retired = annotated({
   retired_date: z.string().regex(ISO_DATE, 'must be an ISO date (YYYY-MM-DD)').optional(),
   reason: z.string().min(1),
 });
 
-export const RoutesSchema = z.strictObject({
+export const RoutesSchema = annotated({
   _schema: z.string().optional(),
   _readme: z.string().optional(),
   provider_pin_note: z.string().optional(),

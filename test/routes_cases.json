@@ -1,0 +1,447 @@
+[
+  {
+    "name": "a cleared mode with every field",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "a cleared mode must name its evidence",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "verified_date": "2026-06-01"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "evidence_ref"
+  },
+  {
+    "name": "a cleared mode must say when not to use it",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "do_not_use_when"
+  },
+  {
+    "name": "a trial mode may omit evidence and do_not_use_when",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "verified_date": "2026-06-01",
+          "status": "trial"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "status is cleared or trial",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "status": "beta"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "status"
+  },
+  {
+    "name": "an explicit cleared status is fine",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "status": "cleared"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "a _-prefixed key on a mode is an annotation",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "_caveat": "supervised runs only"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "any other unknown key on a mode is an error",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "notes": "x"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "notes"
+  },
+  {
+    "name": "a _-prefixed top-level key is an annotation",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "_owner": "platform"
+    },
+    "valid": true
+  },
+  {
+    "name": "an unknown top-level key is an error",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "owner": "platform"
+    },
+    "valid": false,
+    "error_contains": "owner"
+  },
+  {
+    "name": "prices are non-negative",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": -1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "priceIn"
+  },
+  {
+    "name": "verified_date is an ISO date",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026/06/01"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "verified_date"
+  },
+  {
+    "name": "a mode is not named for a vibe",
+    "routes": {
+      "modes": {
+        "cheap": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "cheap"
+  },
+  {
+    "name": "a mode is not in both modes and retired",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "retired": {
+        "extract-fields": {
+          "reason": "x"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "BOTH"
+  },
+  {
+    "name": "a retired entry needs a reason",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "retired": {
+        "old-rung": {
+          "retired_date": "2026-09-29"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "reason"
+  },
+  {
+    "name": "retired_date is an ISO date",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "retired": {
+        "old-rung": {
+          "reason": "x",
+          "retired_date": "Sept 29"
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "retired_date"
+  },
+  {
+    "name": "a _-prefixed key on a retired entry is an annotation",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "retired": {
+        "old-rung": {
+          "reason": "x",
+          "retired_date": "2026-09-29",
+          "_note": "y"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "a provider pin has only known keys",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "provider": {
+            "order": [
+              "p1"
+            ],
+            "sort": "price"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "sort"
+  },
+  {
+    "name": "a null provider pin is unpinned",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "provider": null
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "max_stakes is low, medium or high",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01",
+          "constraints": {
+            "max_stakes": "extreme"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "error_contains": "max_stakes"
+  },
+  {
+    "name": "at least one mode",
+    "routes": {
+      "modes": {}
+    },
+    "valid": false,
+    "error_contains": "modes"
+  },
+  {
+    "name": "modes is required",
+    "routes": {
+      "retired": {}
+    },
+    "valid": false,
+    "error_contains": "modes"
+  },
+  {
+    "name": "staleness_warn_days is a non-negative integer",
+    "routes": {
+      "modes": {
+        "extract-fields": {
+          "model": "vendor/model-a",
+          "priceIn": 0.1,
+          "priceOut": 0.2,
+          "purpose": "Field extraction for aggregate reporting.",
+          "use_when": "Many rows feed a count.",
+          "do_not_use_when": "A person acts on one row.",
+          "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
+          "verified_date": "2026-06-01"
+        }
+      },
+      "staleness_warn_days": -1
+    },
+    "valid": false,
+    "error_contains": "staleness_warn_days"
+  }
+]

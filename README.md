@@ -191,7 +191,8 @@ and which parts are even eligible to move?"* — and eligibility is a property o
 not of the price list.
 
 ```bash
-meg observe ingest        # read Claude Code + Codex sessions you have ALREADY run
+meg observe ingest --from-runtune   # RunTune's evidence: every host it reads, plus router calls
+meg observe ingest        # or read Claude Code + Codex sessions here, without RunTune
 meg observe sync          # pull the provider's daily spend rollup
 meg observe coverage      # is anything reaching the provider around the gate?
 meg workload list         # what work exists, and what may move
@@ -219,10 +220,18 @@ Both land in one `work_events` table, so everything downstream is harness-agnost
 mirrors the split proven by [cc-logger](https://github.com/kkrlstrm/cc-logger) and
 [codex-logger](https://github.com/kkrlstrm/codex-logger).
 
-**Only the *shape* of a call is stored, never its content.** Commands are reduced to an
-argv0 and a script name, prompts to a length and a fingerprint. These databases get shared
-when someone asks for routing help; prompts and arguments would carry customer data and
-credentials into that conversation.
+**With RunTune, the evidence is RunTune's.** model-eval-gate is RunTune's route engine, and
+`meg observe ingest --from-runtune` loads the corpus RunTune already reads (Claude Code,
+Codex, Cursor, Antigravity, a telemetry warehouse, the router's call log) instead of parsing
+the same transcripts a second time.
+
+**What is kept is what RunTune keeps.** Each tool call keeps its shape (argv0, script, file
+extension) and, with RunTune installed, the command, path, URL or skill as RunTune records
+it: passed through RunTune's redactor (database URLs, API keys, bearer tokens, emails and
+phone numbers removed) and cut at 800 characters. A workload class is described by what
+its commands did, not only their first word. Prompts are never kept, only a length and a
+fingerprint. Without RunTune only the shape is kept, and `ingest` prints which. Regex
+redaction is a backstop, not a guarantee: keep this database inside the team it belongs to.
 
 ### The counterfactual nobody else computes
 

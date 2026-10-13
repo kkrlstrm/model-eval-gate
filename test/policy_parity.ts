@@ -16,6 +16,11 @@ import { decide } from '../integrations/openclaw/index.js';
 type Json = Record<string, unknown>;
 
 const routes: Json = JSON.parse(readFileSync('routes.json', 'utf8'));
+// These cases are about constraints, not age. The sample routes' verified dates are
+// fixed, so read against the wall clock they turn every case into a staleness nudge
+// once they pass staleness_warn_days. Pin them to today.
+const today = new Date().toISOString().slice(0, 10);
+for (const m of Object.values(routes.modes as Record<string, Json>)) m.verified_date = today;
 const cases: Array<{
   name: string;
   mode: string;

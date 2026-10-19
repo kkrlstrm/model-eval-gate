@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,6 +35,7 @@ from meg.workload.cluster import WorkloadClass, from_calls, from_harness, counte
 from meg.workload.propose import propose, filter_capable, _price, _is_free_tier
 from meg.scaffold import SchemaGrader, RegexGrader, validate, score_panel
 from meg.policy import decide, load_routes
+from meg.routes_schema import validate_routes
 from meg import audit as meg_audit
 
 FAILS: list[str] = []
@@ -94,19 +96,88 @@ def test_codex_nested_type(tmp: Path) -> None:
     truthy("codex apply_patch keeps a shape", any(e["payload"] for e in tc))
 
 
-def test_summarize_drops_content() -> None:
-    """Telemetry must keep the SHAPE of a call, never its content.
+def test_summarize_keeps_redacted_text_never_secrets_or_prompts() -> None:
+    """The content RunTune keeps is kept, through RunTune's redactor; secrets never are,
+    prompts are only fingerprinted, and without a redactor only the shape is kept."""
+    import re as _re
+    cmd = "psql 'postgres://u:secret@h/db' -c 'select 1'"
+    fake = lambda s, n: _re.sub(r"postgres://\S+", "postgres://[REDACTED]'", s)[:n]  # noqa: E731
+    real = harness.REDACT
+    try:
+        harness.REDACT = fake
+        p = harness._summarize_tool("Bash", {"command": cmd})
+        blob = json.dumps(p)
+        truthy("no secret in summary", "secret" not in blob)
+        truthy("the redacted command is kept", "select 1" in p.get("text", ""))
+        check("argv0 kept", p.get("argv0"), "psql")
+        p2 = harness._summarize_tool("Agent", {"prompt": "Find every supplier in Meridian Freight"})
+        truthy("prompt content dropped", "Meridian" not in json.dumps(p2))
+        truthy("prompt fingerprint kept", bool(p2.get("prompt_sha")))
+        harness.REDACT = None
+        p3 = harness._summarize_tool("Bash", {"command": cmd})
+        truthy("without a redactor: no command text at all", "text" not in p3 and "select 1" not in json.dumps(p3))
+        truthy("  and ingest says so", "shape only" in harness.content_kept())
+    finally:
+        harness.REDACT = real
 
-    Users share these DBs when asking for routing help; prompts and arguments
-    would carry customer data and credentials into that conversation."""
-    p = harness._summarize_tool("Bash", {"command": "psql 'postgres://u:secret@h/db' -c 'select 1'"})
-    blob = json.dumps(p)
-    truthy("no secret in summary", "secret" not in blob)
-    truthy("no full command in summary", "select 1" not in blob)
-    check("argv0 kept", p.get("argv0"), "psql")
-    p2 = harness._summarize_tool("Agent", {"prompt": "Find every supplier in Meridian Freight"})
-    truthy("prompt content dropped", "Meridian" not in json.dumps(p2))
-    truthy("prompt fingerprint kept", bool(p2.get("prompt_sha")))
+
+def test_runtune_evidence_converts_to_store_rows() -> None:
+    """RunTune's corpus becomes work_events (tool attempts) and calls (router calls),
+    with RunTune's redacted text carried over and stable ids for idempotent re-ingest."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace as NS
+    from meg.observe.runtune_source import rows_from_corpus
+    ts = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    ev = lambda **k: NS(**{"source": "claude", "session": "s1", "ts": ts, "kind": "tool", "surface": "Bash",  # noqa: E731
+                           "shape": "python3 digest.py", "ok": True, "actor": "root", "text": "python3 tools/digest.py --all",
+                           "error": "", "model": "vendor/frontier", "tokens_in": 0, "tokens_out": 0, "usd": 0.0,
+                           "duration_ms": 50, "inline_target": None, "chars": 29, **k})
+    corpus = NS(events=[ev(), ev(ok=False, error="exit code # boom", actor="general-purpose"),
+                        ev(kind="model", surface="extract-fields", model="vendor/cheap", text="batch-7",
+                           tokens_in=900, tokens_out=40, usd=0.0002, actor="extract.py:run", source="openrouter")])
+    work, calls = rows_from_corpus(corpus)
+    check("two tool attempts", len(work), 2)
+    check("one router call", len(calls), 1)
+    check("script recovered from the shape", work[0]["payload"].get("script"), "digest.py")
+    check("redacted text carried over", work[0]["payload"].get("text"), "python3 tools/digest.py --all")
+    check("failure keeps its error", work[1]["payload"].get("error"), "exit code # boom")
+    check("sub-agent named", work[1]["subagent"], "general-purpose")
+    check("host turns default to subscription billing", work[0]["billing"], "subscription")
+    check("router calls are api-billed", calls[0]["billing"], "api")
+    check("ids are stable across runs", rows_from_corpus(corpus)[0][0]["event_id"], work[0]["event_id"])
+    twins = NS(events=[ev(), ev()])                       # parallel calls: identical in every field
+    w2, _ = rows_from_corpus(twins)
+    check("identical attempts stay two rows", len({r["event_id"] for r in w2}), 2)
+
+
+def test_runtune_subagents_cluster_by_task() -> None:
+    """RunTune's invocations carry what each sub-agent was asked to do. One row per agent,
+    named by its task, so a sub-agent job repeated across workflow runs is a workload class."""
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace as NS
+    from meg.observe.runtune_source import rows_from_corpus
+    from meg.store import Store
+    from meg.workload.cluster import from_harness
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    inv = lambda n, **k: NS(**{"source": "claude", "invocation": f"a{n}", "session": f"s{n % 4}",  # noqa: E731
+                               "agent_type": "web-researcher", "started": t0 + timedelta(minutes=n),
+                               "ended": t0 + timedelta(minutes=n, seconds=30), "status": "completed",
+                               "model": "haiku", "task": "market-fanout/verify", "description": f"verify:item{n}",
+                               "workflow_name": "market-fanout", "workflow_phase": "Verify",
+                               "prompt": "Re-open the source and check the stat", **k})
+    corpus = NS(events=[], invocations=[inv(n) for n in range(30)]
+                + [inv(99, agent_type="root"), inv(98, task=None)])
+    work, _ = rows_from_corpus(corpus)
+    check("one row per named sub-agent (root and unnamed skipped)", len(work), 30)
+    check("payload names the task", work[0]["payload"]["task"], "market-fanout/verify")
+    check("duration from the agent's own span", work[0]["duration_ms"], 30000)
+    with tempfile.TemporaryDirectory() as d:
+        store = Store(f"{d}/w.db")
+        store.upsert_work(work)
+        classes = [c for c in from_harness(store, min_n=30) if c.evidence.get("kind") == "subagent"]
+    check("a sub-agent class, labelled by task", [c.label for c in classes],
+          ["web-researcher [market-fanout/verify]"])
 
 
 def test_price_sanity() -> None:
@@ -258,6 +329,10 @@ def test_policy_parity_with_ts() -> None:
     root = Path(__file__).resolve().parent.parent
     cases = json.loads((root / "test" / "policy_cases.json").read_text())
     routes = load_routes(root / "routes.json")
+    # About constraints, not age: pin the sample's fixed verified dates to today, or every
+    # case turns into a staleness nudge once they pass staleness_warn_days.
+    for m in routes["modes"].values():
+        m["verified_date"] = date.today().isoformat()
     for c in cases:
         # audit_path=False: tests must never write into the user's real audit log
         d = decide(c["mode"], c["meta"], routes=routes,
@@ -268,6 +343,24 @@ def test_policy_parity_with_ts() -> None:
             truthy(f"  reason mentions {want!r}", want.lower() in d.reason.lower())
         if act := c["expect"].get("action"):
             check(f"  action == {act}", d.action, act)
+
+
+def test_routes_schema_parity() -> None:
+    """meg/routes_schema.py must reach src/schema.ts's verdict on every case in
+    test/routes_cases.json (test/routes_parity.ts runs the TypeScript half). And a policy
+    that fails the schema earns nothing through load_routes()."""
+    root = Path(__file__).resolve().parent.parent
+    for c in json.loads((root / "test" / "routes_cases.json").read_text()):
+        errs = validate_routes(c["routes"])
+        check(f"schema: {c['name'][:52]}", not errs, c["valid"])
+        if want := c.get("error_contains"):
+            truthy(f"  an error names {want!r}", any(want in e for e in errs))
+    with tempfile.TemporaryDirectory() as td:
+        bad = Path(td) / "routes.json"
+        bad.write_text(json.dumps({"modes": {"extract-fields": {"model": "vendor/m"}}}))
+        r = load_routes(bad)
+        check("an invalid policy loads as no modes", r["modes"], {})
+        truthy("  and says why", "fails its schema" in r.get("_error", ""))
 
 
 def test_policy_fails_closed() -> None:
@@ -288,24 +381,29 @@ def test_graduated_actions_and_posture() -> None:
     unattended refuses, because 'nobody objected' is not evidence at 3am."""
     full = {"rows": 5000, "single_row_decision": False, "stakes": "low",
             "input_type": "text"}
-    a = decide("extract-bulk", full, audit_path=False)
+    # About posture, not age: pin the sample's fixed verified dates to today (see
+    # test_policy_parity_with_ts).
+    routes = load_routes(Path(__file__).resolve().parent.parent / "routes.json")
+    for mode in routes["modes"].values():
+        mode["verified_date"] = date.today().isoformat()
+    a = decide("extract-bulk", full, routes=routes, audit_path=False)
     check("full metadata allows", a.action, "allow")
     truthy("and proceeds", a.proceeds)
 
-    n = decide("extract-bulk", {}, posture="attended", audit_path=False)
+    n = decide("extract-bulk", {}, routes=routes, posture="attended", audit_path=False)
     check("attended + unproven -> nudge", n.action, "nudge")
     truthy("nudge still proceeds", n.proceeds)
     truthy("nudge explains itself", any("UNVERIFIED" in x for x in n.notes))
 
-    u = decide("extract-bulk", {}, posture="unattended", audit_path=False)
+    u = decide("extract-bulk", {}, routes=routes, posture="unattended", audit_path=False)
     check("unattended + unproven -> refuse", u.action, "refuse")
     check("and does not proceed", u.proceeds, False)
 
-    m = decide("extract-bulk", full, observe_only=True, audit_path=False)
+    m = decide("extract-bulk", full, routes=routes, observe_only=True, audit_path=False)
     check("observe_only -> monitor", m.action, "monitor")
     truthy("monitor still proceeds (nothing enforced)", m.proceeds)
 
-    b = decide("generic-cheap", {}, audit_path=False)
+    b = decide("generic-cheap", {}, routes=routes, audit_path=False)
     check("retired -> block", b.action, "block")
     check("block does not proceed", b.proceeds, False)
 
@@ -493,7 +591,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         print("codex reader");            test_codex_nested_type(tmp)
-    print("content redaction");           test_summarize_drops_content()
+    print("content retention");           test_summarize_keeps_redacted_text_never_secrets_or_prompts()
+    print("runtune evidence");            test_runtune_evidence_converts_to_store_rows()
+    print("runtune sub-agents");          test_runtune_subagents_cluster_by_task()
     print("price sanity");                test_price_sanity()
     print("hard filters before price");   test_hard_filters_before_price()
     print("counterfactual honesty");      test_counterfactual_honesty()
@@ -504,6 +604,7 @@ def main() -> int:
     print("coverage / bypass");           test_coverage_detects_bypass()
     print("call clustering");             test_calls_cluster_by_tag()
     print("policy parity (shared cases)"); test_policy_parity_with_ts()
+    print("routes schema parity");        test_routes_schema_parity()
     print("policy fails closed");         test_policy_fails_closed()
     print("graduated actions/posture");    test_graduated_actions_and_posture()
     print("audit chain");                 test_audit_chain_detects_tampering()

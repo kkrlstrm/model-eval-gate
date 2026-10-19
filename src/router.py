@@ -30,7 +30,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -44,10 +43,7 @@ _OR_HTTP = "https://openrouter.ai/api/v1/chat/completions"
 _HTTP_TEXT_CAP = 400_000
 _ALLOW_EMBEDDED = os.environ.get("MODEL_EVAL_GATE_ALLOW_EMBEDDED") == "1"
 
-_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _STAKES_RANK = {"low": 0, "medium": 1, "high": 2}
-_RESERVED_GENERIC = {"chat", "cheap", "cheapest", "free", "online", "general",
-                     "default", "auto", "fast", "model", "llm", "any", "fallback"}
 _GRADER_KINDS = {"fieldAgreement", "normalizedFieldAgreement", "enumMatch",
                  "numericWithinTolerance", "arraySetMatch", "mustNotContain",
                  "regexMatch", "jsonSubset", "human", "llmJudge"}
@@ -64,15 +60,34 @@ _EMBEDDED_ROUTES: dict[str, dict] = {
 }
 
 
+def _validate_routes(raw) -> list[str]:
+    """The routes.json schema (meg/routes_schema.py, the Python half of src/schema.ts).
+
+    This file reads ROOT/routes.json, so it lives in the repository and the validator
+    is next to it. If it cannot be imported the policy fails closed: an unvalidated
+    policy routes nothing."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from meg.routes_schema import validate_routes
+    except ImportError:
+        return [f"routes.json validator unavailable (meg/routes_schema.py not found under {ROOT})"]
+    return validate_routes(raw)
+
+
 def _load_full() -> dict | None:
-    """The full validated-shape routes object, or None if missing/unparseable."""
+    """The routes object when it parses AND passes the schema, else None (fail closed).
+    The TypeScript CLI refuses an invalid policy the same way (loadRoutesOrExit)."""
     try:
         raw = json.loads(ROUTES_PATH.read_text())
-        if raw.get("modes"):
-            return raw
     except Exception:  # noqa: BLE001
-        pass
-    return None
+        return None
+    errs = _validate_routes(raw)
+    if errs:
+        print(f"[model-eval-gate] routes.json failed validation ({len(errs)} error(s)); refusing ALL "
+              f"modes. First: {errs[0]}", file=sys.stderr)
+        return None
+    return raw
 
 
 _FULL = _load_full()
@@ -267,34 +282,6 @@ def vision_call(mode: str, prompt: str, image_path, *, timeout: int = 180):
 
 
 # --------------------------------------------------------------------------- offline validation
-def _validate_routes(raw) -> list[str]:
-    """Python-side mirror of src/schema.ts validation (structural + cross-checks)."""
-    errs: list[str] = []
-    if not isinstance(raw, dict):
-        return ["routes.json: root must be an object"]
-    modes = raw.get("modes")
-    if not isinstance(modes, dict) or not modes:
-        return ["modes: at least one mode is required"]
-    retired = raw.get("retired") or {}
-    for name, m in modes.items():
-        if name.lower() in _RESERVED_GENERIC:
-            errs.append(f"modes.{name}: reserved generic name — name a mode for its task shape (GOVERNANCE.md)")
-        if not isinstance(m, dict):
-            errs.append(f"modes.{name}: must be an object"); continue
-        for f in ("model", "purpose", "use_when", "do_not_use_when"):
-            if not isinstance(m.get(f), str) or not m.get(f):
-                errs.append(f"modes.{name}.{f}: required non-empty string")
-        for f in ("priceIn", "priceOut"):
-            if not isinstance(m.get(f), (int, float)):
-                errs.append(f"modes.{name}.{f}: required number")
-        vd = m.get("verified_date")
-        if not (isinstance(vd, str) and _ISO_DATE.match(vd)):
-            errs.append(f"modes.{name}.verified_date: must be an ISO date (YYYY-MM-DD)")
-        if name in retired:
-            errs.append(f'"{name}" appears in BOTH modes and retired')
-    return errs
-
-
 def _validate_spec(raw, mode_names: set[str]) -> list[str]:
     errs: list[str] = []
     if not isinstance(raw, dict):

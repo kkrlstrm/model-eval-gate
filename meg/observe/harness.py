@@ -237,13 +237,35 @@ def read_codex(root: Path | None = None, *, billing: str = "subscription") -> li
 
 
 # --------------------------------------------------------------------------- #
-def _summarize_tool(name: str, inp: dict) -> dict:
-    """Keep the SHAPE of a call, drop the content.
+def _load_redactor():
+    try:
+        from runtune.evidence.redact import redact
+        return redact
+    except ImportError:
+        return None
 
-    Clustering needs to know 'a bash call that ran page-digest.py on a URL', not
-    the URL. Storing full arguments would put customer data, credentials and
-    prompt text into a telemetry DB that a user may later share when asking for
-    routing help -- so the summary is deliberately lossy, and content never lands.
+
+# RunTune's redactor, so both tools keep the same text under the same rules. Without
+# RunTune installed only the shape is kept, and `ingest` says so.
+REDACT = _load_redactor()
+TEXT_LIMIT = 800            # RunTune's limit for a recorded command
+
+
+def content_kept() -> str:
+    return ("redacted text (RunTune's redactor)" if REDACT else
+            "shape only — install runtune to keep redacted text")
+
+
+def _summarize_tool(name: str, inp: dict) -> dict:
+    """What a tool call did, kept at RunTune's level of detail.
+
+    The shape (argv0, script, file extension, prompt fingerprint) is always kept: it is
+    what clustering keys on. With RunTune installed the content RunTune keeps is kept
+    too — the command, path, URL or skill, passed through RunTune's redactor (DSNs, API
+    keys, bearer tokens, emails, phone numbers) and cut at 800 characters — because a
+    workload class is described by what the commands did, not only their first word.
+    Prompts are never kept, only fingerprinted, as RunTune does. Regex redaction is a
+    backstop, not a guarantee: do not share this database outside the team it belongs to.
     """
     out: dict = {}
     if cmd := (inp.get("command") or inp.get("cmd")):
@@ -256,10 +278,18 @@ def _summarize_tool(name: str, inp: dict) -> dict:
                 out["script"] = os.path.basename(tok)
                 break
         out["len"] = len(cmd)
+        if REDACT:
+            out["text"] = REDACT(cmd, TEXT_LIMIT)
     for k in ("file_path", "path", "notebook_path"):
         if v := inp.get(k):
             out["ext"] = os.path.splitext(str(v))[1]
+            if REDACT:
+                out["path"] = REDACT(str(v), 300)
             break
+    if REDACT:
+        for k in ("url", "skill"):
+            if v := inp.get(k):
+                out[k] = REDACT(str(v), 300)
     if p := inp.get("prompt"):
         # A prompt fingerprint clusters repeated sub-agent work without keeping text.
         out["prompt_sha"] = hashlib.sha256(str(p).encode()).hexdigest()[:12]

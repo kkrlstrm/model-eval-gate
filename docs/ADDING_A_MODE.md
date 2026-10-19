@@ -43,15 +43,24 @@ Grader kinds (`eval/graders.ts`) — **code** graders are deterministic, free, a
 
 Validate everything offline anytime (no API key): `npm run check` (or `python src/router.py check`).
 
-## 2. Score the candidate against a frontier anchor
+## 2. Score the candidate against the incumbent
 
-Add the candidate model to `routes.json` under a temporary mode name (or point the spec's model at it) and run:
+Run both arms on the spec's tasks, with the same graders and k:
 
 ```bash
-npx tsx eval/regression.ts --mode my-new-mode --k 5
+npx tsx eval/bakeoff.ts --spec eval/regression/my-new-mode.json \
+    --candidate <candidate model> --incumbent <model it replaces> --k 5 --margin 0.02
 ```
 
-Also run the same tasks through your frontier/orchestrator model to get the anchor numbers. The candidate has to clear a **strict bar** — measurable parity for the use case. If it only wins with prompt scaffolding or "usually," it fails.
+When the incumbent is a frontier model you run on a subscription harness, score it there
+and pass its suite with `--incumbent-results <file>` instead of `--incumbent`.
+
+The bake-off writes a `runtune.route-eval/1` result (to route-eval.json unless you pass `--out`) with the verdict, both
+scores and the rules that decided it (`eval/route_eval.ts`). The candidate has to clear a
+**strict bar**: at least the incumbent's score minus the margin you declare, the spec's
+consistency floor, and 20 or more cases. RunTune applies a route change only with a passing
+result about that exact mode, candidate and incumbent (`runtune apply <id> --eval route-eval.json`).
+If the candidate only wins with prompt scaffolding or "usually", it fails.
 
 ## 3. If it passes, promote it
 

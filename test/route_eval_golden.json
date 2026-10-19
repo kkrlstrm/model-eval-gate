@@ -1,0 +1,29 @@
+{
+  "schema": "runtune.route-eval/1",
+  "mode": "extract-fields",
+  "candidate": "cand/a",
+  "verdict": "pass",
+  "reasons": [
+    "every rule in eval/route_eval.ts held"
+  ],
+  "cases": 24,
+  "k": 3,
+  "metric": "mean grader score over k trials (agreement)",
+  "candidate_score": 0.91,
+  "candidate_pass_hat_k": 0.9,
+  "providers_seen": [
+    "p"
+  ],
+  "cost_usd": {
+    "candidate": 0.0072,
+    "reported": true,
+    "incumbent": 0.0072
+  },
+  "created": "2026-10-13T12:00:00.000Z",
+  "harness": "model-eval-gate eval/bakeoff.ts",
+  "incumbent": "inc/b",
+  "incumbent_score": 0.9,
+  "incumbent_pass_hat_k": 0.9,
+  "non_inferiority_margin": 0.02,
+  "consistency_floor": 0.5
+}

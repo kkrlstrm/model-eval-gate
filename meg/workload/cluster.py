@@ -166,7 +166,8 @@ def from_harness(store: Store, *, min_n: int = 30) -> list[WorkloadClass]:
         # Grouping key, most specific first: a named script is a task; a bare
         # argv0 is a habit; a repeated sub-agent prompt is an unnamed worker.
         if r.get("subagent") and p.get("prompt_sha"):
-            key = ("subagent", r["subagent"], p["prompt_sha"][:8])
+            # A named task (RunTune's workflow/phase or description) reads better than a hash.
+            key = ("subagent", r["subagent"], p.get("task") or p["prompt_sha"][:8])
         elif p.get("script"):
             key = ("script", p["script"], "")
         else:

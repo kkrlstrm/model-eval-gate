@@ -48,10 +48,21 @@ def cmd_observe(a) -> int:
     store = Store(a.db)
 
     if a.action == "ingest":
-        stats = harness.ingest(store, claude_code=not a.no_claude_code,
-                               codex=not a.no_codex)
-        for k, v in stats.items():
-            print(f"{k:14s} {v:,} events")
+        if a.from_runtune:
+            from .observe import runtune_source
+            r = runtune_source.ingest(store, sources=a.runtune_source.split(",") if a.runtune_source else None,
+                                      db=a.runtune_db, days=a.days, routes=a.routes,
+                                      host_billing=a.host_billing)
+            print(f"from RunTune: {r['work_events']:,} tool attempts, {r['calls']:,} router calls")
+            for line in r["coverage"].values():
+                print(f"  {line}")
+            print("content kept: redacted text (RunTune's evidence)")
+        else:
+            stats = harness.ingest(store, claude_code=not a.no_claude_code,
+                                   codex=not a.no_codex)
+            for k, v in stats.items():
+                print(f"{k:14s} {v:,} events")
+            print(f"content kept: {harness.content_kept()}")
         by = store.q("SELECT harness, kind, count(*) n FROM work_events "
                      "GROUP BY harness, kind ORDER BY n DESC")
         print()
@@ -250,6 +261,15 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--no-claude-code", action="store_true")
     o.add_argument("--no-codex", action="store_true")
     o.add_argument("--limit", type=int, default=500)
+    o.add_argument("--from-runtune", action="store_true",
+                   help="ingest RunTune's evidence (every host it reads, plus router calls) "
+                        "instead of reading the harnesses here")
+    o.add_argument("--runtune-source", help="RunTune's --source (default: its own rule)")
+    o.add_argument("--runtune-db", help="RunTune's --db: a DSN or the env var holding one")
+    o.add_argument("--days", type=int, default=30)
+    o.add_argument("--routes", help="routes.json, so router calls are judged against it")
+    o.add_argument("--host-billing", choices=["subscription", "api"], default="subscription",
+                   help="how the coding agents' own turns are billed (router calls are always api)")
     o.set_defaults(fn=cmd_observe)
 
     w = sub.add_parser("workload", parents=[common]); w.add_argument("action", choices=["list", "propose"])

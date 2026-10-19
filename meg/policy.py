@@ -32,6 +32,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .routes_schema import validate_routes
+
 ROOT = Path(__file__).resolve().parent.parent
 ROUTES = ROOT / "routes.json"
 
@@ -85,8 +87,12 @@ def load_routes(path: Path | str | None = None) -> dict:
         data = json.loads(p.read_text())
     except Exception:  # noqa: BLE001 — unreadable policy == no permissions
         return {"modes": {}, "retired": {}, "_error": f"unreadable policy at {p}"}
-    if not isinstance(data.get("modes"), dict):
-        return {"modes": {}, "retired": {}, "_error": "policy has no modes object"}
+    # The same schema the TypeScript CLI and src/router.py enforce: a policy that fails
+    # it earns nothing here either, or the runtimes would disagree about one file.
+    errs = validate_routes(data)
+    if errs:
+        return {"modes": {}, "retired": {}, "_error": f"policy fails its schema: {errs[0]}"
+                + (f" (+{len(errs) - 1} more)" if len(errs) > 1 else "")}
     return data
 
 

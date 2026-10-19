@@ -8,6 +8,9 @@ of the same evidence. So `meg observe ingest --from-runtune` loads RunTune's cor
 writes it into this store:
 
     tool attempts     -> work_events   (payload: argv0, script, shape, redacted text)
+    sub-agents        -> work_events   (one row per agent, named by its task: the
+                                        workflow and phase, or the Agent call's
+                                        description; payload.task + prompt_sha)
     router calls      -> calls         (mode, model, tokens, cost, latency; billing api)
 
 The harness readers in harness.py stay for use without RunTune.
@@ -68,6 +71,28 @@ def rows_from_corpus(corpus, host_billing: str = "subscription") -> tuple[list[d
             "status": "success" if e.ok else "failure", "duration_ms": e.duration_ms,
             "agent_model": e.model, "subagent": None if e.actor == "root" else e.actor,
             "payload": payload, "billing": getattr(e, "billing", None) or host_billing,
+        })
+    for inv in getattr(corpus, "invocations", []):
+        task = getattr(inv, "task", None)
+        if inv.agent_type == "root" or not task or not inv.started:
+            continue
+        # One row per agent, keyed by its task, so `from_harness` sees a sub-agent job
+        # repeated across runs: the unit a bake-off would move to a cheaper model.
+        payload = {"task": task, "prompt_sha": hashlib.sha256(task.encode()).hexdigest()[:12]}
+        for k in ("description", "workflow_name", "workflow_phase"):
+            if getattr(inv, k, None):
+                payload[k] = getattr(inv, k)
+        if getattr(inv, "prompt", None):
+            payload["text"] = inv.prompt                  # already redacted by RunTune
+        work.append({
+            "event_id": _id("runtune-agent", inv.source, inv.invocation),
+            "harness": inv.source, "session_id": inv.session,
+            "started_at": inv.started.isoformat(timespec="seconds"),
+            "kind": "tool_call", "name": "Agent",
+            "status": "success" if inv.status == "completed" else "failure",
+            "duration_ms": int((inv.ended - inv.started).total_seconds() * 1000) if inv.ended else None,
+            "agent_model": inv.model, "subagent": inv.agent_type,
+            "payload": payload, "billing": host_billing,
         })
     return work, calls
 

@@ -150,6 +150,36 @@ def test_runtune_evidence_converts_to_store_rows() -> None:
     check("identical attempts stay two rows", len({r["event_id"] for r in w2}), 2)
 
 
+def test_runtune_subagents_cluster_by_task() -> None:
+    """RunTune's invocations carry what each sub-agent was asked to do. One row per agent,
+    named by its task, so a sub-agent job repeated across workflow runs is a workload class."""
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace as NS
+    from meg.observe.runtune_source import rows_from_corpus
+    from meg.store import Store
+    from meg.workload.cluster import from_harness
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    inv = lambda n, **k: NS(**{"source": "claude", "invocation": f"a{n}", "session": f"s{n % 4}",  # noqa: E731
+                               "agent_type": "web-researcher", "started": t0 + timedelta(minutes=n),
+                               "ended": t0 + timedelta(minutes=n, seconds=30), "status": "completed",
+                               "model": "haiku", "task": "market-fanout/verify", "description": f"verify:item{n}",
+                               "workflow_name": "market-fanout", "workflow_phase": "Verify",
+                               "prompt": "Re-open the source and check the stat", **k})
+    corpus = NS(events=[], invocations=[inv(n) for n in range(30)]
+                + [inv(99, agent_type="root"), inv(98, task=None)])
+    work, _ = rows_from_corpus(corpus)
+    check("one row per named sub-agent (root and unnamed skipped)", len(work), 30)
+    check("payload names the task", work[0]["payload"]["task"], "market-fanout/verify")
+    check("duration from the agent's own span", work[0]["duration_ms"], 30000)
+    with tempfile.TemporaryDirectory() as d:
+        store = Store(f"{d}/w.db")
+        store.upsert_work(work)
+        classes = [c for c in from_harness(store, min_n=30) if c.evidence.get("kind") == "subagent"]
+    check("a sub-agent class, labelled by task", [c.label for c in classes],
+          ["web-researcher [market-fanout/verify]"])
+
+
 def test_price_sanity() -> None:
     """Negative/absent prices must never rank first."""
     check("negative price -> inf", _price({"pricing": {"prompt": "-1"}}, "prompt"), float("inf"))
@@ -563,6 +593,7 @@ def main() -> int:
         print("codex reader");            test_codex_nested_type(tmp)
     print("content retention");           test_summarize_keeps_redacted_text_never_secrets_or_prompts()
     print("runtune evidence");            test_runtune_evidence_converts_to_store_rows()
+    print("runtune sub-agents");          test_runtune_subagents_cluster_by_task()
     print("price sanity");                test_price_sanity()
     print("hard filters before price");   test_hard_filters_before_price()
     print("counterfactual honesty");      test_counterfactual_honesty()

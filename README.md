@@ -229,8 +229,11 @@ the same transcripts a second time.
 extension) and, with RunTune installed, the command, path, URL or skill as RunTune records
 it: passed through RunTune's redactor (database URLs, API keys, bearer tokens, emails and
 phone numbers removed) and cut at 800 characters. A workload class is described by what
-its commands did, not only their first word. Prompts are never kept, only a length and a
-fingerprint. Without RunTune only the shape is kept, and `ingest` prints which. Regex
+its commands did, not only their first word. Each sub-agent is one row named by its task
+(its workflow and phase, or the Agent call's description), with the start of the task it was
+given as RunTune keeps it (redacted, 300 characters), so a sub-agent job repeated across runs
+is a workload class. A person's own prompts are never kept, only a length and a fingerprint.
+Without RunTune only the shape is kept, and `ingest` prints which. Regex
 redaction is a backstop, not a guarantee: keep this database inside the team it belongs to.
 
 ### The counterfactual nobody else computes

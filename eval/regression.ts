@@ -210,8 +210,14 @@ for (const specPath of specFiles) {
   }
 
   if (routeEvalDir && !signals.length) {
-    const doc = buildRouteEval({ mode: spec.mode, candidate: suite, spec,
-                                 harness: 'model-eval-gate eval/regression.ts', specPath, specSha256: sha256 });
+    const doc = buildRouteEval({
+      mode: spec.mode,
+      candidate: suite,
+      spec,
+      harness: 'model-eval-gate eval/regression.ts',
+      specPath,
+      specSha256: sha256,
+    });
     mkdirSync(routeEvalDir, { recursive: true });
     const p = join(routeEvalDir, `${spec.mode}.route-eval.json`);
     writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');

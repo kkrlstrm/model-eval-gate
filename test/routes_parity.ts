@@ -9,9 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { validateRoutes } from '../src/schema.ts';
 
-const cases: { name: string; routes: unknown; valid: boolean; error_contains?: string }[] = JSON.parse(
-  readFileSync('test/routes_cases.json', 'utf8'),
-);
+const cases: { name: string; routes: unknown; valid: boolean; error_contains?: string }[] =
+  JSON.parse(readFileSync('test/routes_cases.json', 'utf8'));
 let failed = 0;
 for (const c of cases) {
   const r = validateRoutes(c.routes);
@@ -21,8 +20,12 @@ for (const c of cases) {
   if (verdictOk && named) console.log(`  ✓ ${c.name}`);
   else {
     failed++;
-    console.log(`  ✗ ${c.name}: valid=${r.ok} (want ${c.valid})${c.error_contains ? `, want an error naming "${c.error_contains}"` : ''} — ${errors.join(' | ')}`);
+    console.log(
+      `  ✗ ${c.name}: valid=${r.ok} (want ${c.valid})${c.error_contains ? `, want an error naming "${c.error_contains}"` : ''} — ${errors.join(' | ')}`,
+    );
   }
 }
-console.log(failed ? `\n✗ routes schema parity: ${failed} failed` : '\n✓ routes schema parity: all passed');
+console.log(
+  failed ? `\n✗ routes schema parity: ${failed} failed` : '\n✓ routes schema parity: all passed',
+);
 process.exit(failed ? 1 : 0);

@@ -356,9 +356,7 @@
           "evidence_ref": "docs/OBSERVATIONS.example.md 'Eval 1'",
           "verified_date": "2026-06-01",
           "provider": {
-            "order": [
-              "p1"
-            ],
+            "order": ["p1"],
             "sort": "price"
           }
         }

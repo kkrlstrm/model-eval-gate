@@ -84,8 +84,10 @@ const Mode = annotated({
       ctx.addIssue({
         code: 'custom',
         path: [f],
-        message: f === 'evidence_ref' ? 'required for a cleared mode (a cleared mode names its evidence)'
-                                      : 'required for a cleared mode',
+        message:
+          f === 'evidence_ref'
+            ? 'required for a cleared mode (a cleared mode names its evidence)'
+            : 'required for a cleared mode',
       });
 });
 

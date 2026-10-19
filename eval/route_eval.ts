@@ -87,8 +87,14 @@ export function buildRouteEval(i: RouteEvalInput): RouteEval {
   const c = i.candidate;
   const inc = i.incumbent;
   if (inc) {
-    const a = c.tasks.map((t) => t.task_id).sort().join('\n');
-    const b = inc.tasks.map((t) => t.task_id).sort().join('\n');
+    const a = c.tasks
+      .map((t) => t.task_id)
+      .sort()
+      .join('\n');
+    const b = inc.tasks
+      .map((t) => t.task_id)
+      .sort()
+      .join('\n');
     if (a !== b) throw new Error('candidate and incumbent were scored on different tasks');
     if (c.k !== inc.k) throw new Error(`candidate ran k=${c.k}, incumbent k=${inc.k}`);
   }
@@ -99,7 +105,10 @@ export function buildRouteEval(i: RouteEvalInput): RouteEval {
     if (verdict === 'pass') verdict = 'fail';
   };
 
-  for (const [arm, s] of [['candidate', c], ['incumbent', inc]] as const) {
+  for (const [arm, s] of [
+    ['candidate', c],
+    ['incumbent', inc],
+  ] as const) {
     if (s && inconclusive(s)) {
       verdict = 'inconclusive';
       reasons.push(`${arm}: ${s.outcomes.provider_unavailable} trials never reached a provider`);
@@ -114,8 +123,10 @@ export function buildRouteEval(i: RouteEvalInput): RouteEval {
   const base = i.spec.baseline?.meanScore;
   if (inc) {
     if (c.meanScore < inc.meanScore - margin)
-      fail(`candidate scored ${c.meanScore.toFixed(3)} against the incumbent's ${inc.meanScore.toFixed(3)}`
-        + (margin ? ` (margin ${margin})` : ''));
+      fail(
+        `candidate scored ${c.meanScore.toFixed(3)} against the incumbent's ${inc.meanScore.toFixed(3)}` +
+          (margin ? ` (margin ${margin})` : ''),
+      );
   } else if (base != null) {
     const tol = i.spec.drift_tolerance ?? 0.1;
     if (c.meanScore < base - tol)

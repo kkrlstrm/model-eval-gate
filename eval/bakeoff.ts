@@ -31,8 +31,10 @@ const flag = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const usage = (msg: string): never => {
-  console.error(`✗ ${msg}\n  usage: npx tsx eval/bakeoff.ts --spec <file> --candidate <model> ` +
-    `[--incumbent <model> | --incumbent-results <suite.json>] [--k N] [--margin X] [--out <file>]`);
+  console.error(
+    `✗ ${msg}\n  usage: npx tsx eval/bakeoff.ts --spec <file> --candidate <model> ` +
+      `[--incumbent <model> | --incumbent-results <suite.json>] [--k N] [--margin X] [--out <file>]`,
+  );
   process.exit(2);
 };
 
@@ -48,8 +50,10 @@ const out = flag('--out') ?? 'route-eval.json';
 // token through OpenRouter. Score it there and pass --incumbent-results.
 for (const m of [candidateModel, incumbentModel])
   if (m && m.toLowerCase().startsWith('anthropic/'))
-    usage(`${m}: Anthropic models are not called through OpenRouter here — score the anchor ` +
-      'on its own harness and pass its suite with --incumbent-results');
+    usage(
+      `${m}: Anthropic models are not called through OpenRouter here — score the anchor ` +
+        'on its own harness and pass its suite with --incumbent-results',
+    );
 
 let loaded;
 try {
@@ -67,10 +71,24 @@ if (!process.env.OPENROUTER_API_KEY) {
 }
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
 
-const arm = (model: string): ModelSpec => ({ model, label: model, priceIn: 0, priceOut: 0, provider: null });
+const arm = (model: string): ModelSpec => ({
+  model,
+  label: model,
+  priceIn: 0,
+  priceOut: 0,
+  provider: null,
+});
 const run = (model: string): Promise<SuiteResult> =>
-  runSuite({ client, spec: arm(model), tasks, parse, graders, k, threshold,
-             onProgress: () => process.stdout.write('.') });
+  runSuite({
+    client,
+    spec: arm(model),
+    tasks,
+    parse,
+    graders,
+    k,
+    threshold,
+    onProgress: () => process.stdout.write('.'),
+  });
 
 console.log(`══ bake-off · ${spec.mode} · ${tasks.length} tasks · k=${k}`);
 const candidate = await run(candidateModel);
@@ -85,14 +103,24 @@ if (incumbentModel) {
 
 let result;
 try {
-  result = buildRouteEval({ mode: spec.mode, candidate, incumbent, spec, margin,
-                            harness: 'model-eval-gate eval/bakeoff.ts', specPath, specSha256: sha256 });
+  result = buildRouteEval({
+    mode: spec.mode,
+    candidate,
+    incumbent,
+    spec,
+    margin,
+    harness: 'model-eval-gate eval/bakeoff.ts',
+    specPath,
+    specSha256: sha256,
+  });
 } catch (e: any) {
   usage(e.message);
 }
 writeFileSync(out, JSON.stringify(result, null, 2) + '\n');
-console.log(`candidate ${candidateModel}: ${result!.candidate_score}` +
-  (incumbent ? `   incumbent ${incumbent.model}: ${result!.incumbent_score}` : ''));
+console.log(
+  `candidate ${candidateModel}: ${result!.candidate_score}` +
+    (incumbent ? `   incumbent ${incumbent.model}: ${result!.incumbent_score}` : ''),
+);
 console.log(`verdict: ${result!.verdict.toUpperCase()} — ${result!.reasons.join('; ')}`);
 console.log(`wrote ${out}   (RunTune: runtune apply <id> --eval ${out})`);
 process.exit(result!.verdict === 'pass' ? 0 : 1);
